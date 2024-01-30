@@ -16,7 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React from 'react';
+import { useMemo } from 'react';
 import {
   FileTransferActionBar,
   FileTransfer,
@@ -39,7 +39,7 @@ export function DocumentTerminal(props: {
   visible: boolean;
 }) {
   const ctx = useAppContext();
-  const { configService } = ctx.mainProcessClient;
+  const { configService, getRuntimeSettings } = ctx.mainProcessClient;
   const { visible, doc } = props;
   const { attempt, initializePtyProcess } = useDocumentTerminal(doc);
   const { upload, download } = useTshFileTransferHandlers();
@@ -47,6 +47,10 @@ export function DocumentTerminal(props: {
     'terminal.fontFamily'
   ).value;
   const terminalFontSize = configService.get('terminal.fontSize').value;
+  const runtimeSettings = useMemo(
+    () => getRuntimeSettings(),
+    [getRuntimeSettings]
+  );
 
   // Initializing a new terminal might fail for multiple reasons, for example:
   //
@@ -133,6 +137,7 @@ export function DocumentTerminal(props: {
           unsanitizedFontFamily={unsanitizedTerminalFontFamily}
           fontSize={terminalFontSize}
           onEnterKey={attempt.data.refreshTitle}
+          runtimeSettings={runtimeSettings}
         />
       )}
     </Document>

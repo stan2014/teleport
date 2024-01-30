@@ -29,6 +29,7 @@ import {
 
 import { IPtyProcess } from 'teleterm/sharedProcess/ptyHost';
 import { DocumentTerminal } from 'teleterm/ui/services/workspacesService';
+import { RuntimeSettings } from 'teleterm/mainProcess/types';
 
 import { Reconnect } from '../Reconnect';
 
@@ -47,6 +48,7 @@ type TerminalProps = {
    */
   unsanitizedFontFamily: string;
   fontSize: number;
+  runtimeSettings: RuntimeSettings;
   onEnterKey?(): void;
 };
 
@@ -73,6 +75,7 @@ export function Terminal(props: TerminalProps) {
       el: refElement.current,
       fontSize: props.fontSize,
       theme: theme.colors.terminal,
+      runtimeSettings: props.runtimeSettings,
     });
 
     // Start the PTY process.

@@ -24,12 +24,16 @@ import { debounce } from 'shared/utils/highbar';
 import { IPtyProcess } from 'teleterm/sharedProcess/ptyHost';
 import Logger from 'teleterm/logger';
 
+import { RuntimeSettings } from 'teleterm/mainProcess/types';
+import { getWindowsBuildNumber } from 'teleterm/mainProcess/windowsBuildNumber';
+
 const WINDOW_RESIZE_DEBOUNCE_DELAY = 200;
 
 type Options = {
   el: HTMLElement;
   fontSize: number;
   theme: ITheme;
+  runtimeSettings: RuntimeSettings;
 };
 
 export default class TtyTerminal {
@@ -65,6 +69,13 @@ export default class TtyTerminal {
       scrollback: 5000,
       minimumContrastRatio: 4.5, // minimum for WCAG AA compliance
       theme: this.options.theme,
+      windowsPty:
+        this.options.runtimeSettings.platform === 'win32'
+          ? {
+              backend: 'winpty',
+              buildNumber: getWindowsBuildNumber(this.options.runtimeSettings),
+            }
+          : undefined,
       windowOptions: {
         setWinSizeChars: true,
       },
