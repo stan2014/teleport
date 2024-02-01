@@ -161,7 +161,8 @@ func (s *Server) getCACertPaths(database types.Database) ([]string, error) {
 	switch database.GetType() {
 	// All RDS instances share the same root CA (per AWS region) which can be
 	// downloaded from a well-known URL.
-	case types.DatabaseTypeRDS:
+	// DocumentDB uses same certs as RDS.
+	case types.DatabaseTypeRDS, types.DatabaseTypeDocumentDB:
 		return []string{filepath.Join(s.cfg.DataDir, filepath.Base(rdsCAURLForDatabase(database)))}, nil
 
 	// All Redshift instances share the same root CA which can be downloaded
