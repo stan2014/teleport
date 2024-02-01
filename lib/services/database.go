@@ -889,6 +889,19 @@ func NewDatabasesFromRDSClusterCustomEndpoints(cluster *rds.DBCluster, memberIns
 	return databases, trace.NewAggregate(errors...)
 }
 
+func checkRDSClusterMembers(cluster *rds.DBCluster) (hasWriterInstance, hasReaderInstance bool) {
+	for _, clusterMember := range cluster.DBClusterMembers {
+		if clusterMember != nil {
+			if aws.BoolValue(clusterMember.IsClusterWriter) {
+				hasWriterInstance = true
+			} else {
+				hasReaderInstance = true
+			}
+		}
+	}
+	return
+}
+
 // NewDatabasesFromRDSCluster creates all database resources from an RDS Aurora
 // cluster.
 func NewDatabasesFromRDSCluster(cluster *rds.DBCluster, memberInstances []*rds.DBInstance) (types.Databases, error) {
@@ -899,16 +912,7 @@ func NewDatabasesFromRDSCluster(cluster *rds.DBCluster, memberInstances []*rds.D
 	// - Aurora cluster with one instance: one writer
 	// - Aurora cluster with three instances: one writer and two readers
 	// - Secondary cluster of a global database: one or more readers
-	var hasWriterInstance, hasReaderInstance bool
-	for _, clusterMember := range cluster.DBClusterMembers {
-		if clusterMember != nil {
-			if aws.BoolValue(clusterMember.IsClusterWriter) {
-				hasWriterInstance = true
-			} else {
-				hasReaderInstance = true
-			}
-		}
-	}
+	hasWriterInstance, hasReaderInstance := checkRDSClusterMembers(cluster)
 
 	// Add a database from primary endpoint, if any writer instances.
 	if cluster.Endpoint != nil && hasWriterInstance {
@@ -941,6 +945,80 @@ func NewDatabasesFromRDSCluster(cluster *rds.DBCluster, memberInstances []*rds.D
 	}
 
 	return databases, trace.NewAggregate(errors...)
+}
+
+// NewDatabasesFromDocumentDBCluster creates all database resources from a
+// DocumentDB cluster.
+func NewDatabasesFromDocumentDBCluster(cluster *rds.DBCluster) (types.Databases, error) {
+	var errors []error
+	var databases types.Databases
+
+	// Find out what types of instances the cluster has. Same logic as
+	// NewDatabasesFromRDSCluster.
+	hasWriterInstance, hasReaderInstance := checkRDSClusterMembers(cluster)
+
+	// Add a database from primary endpoint, if any writer instances.
+	if cluster.Endpoint != nil && hasWriterInstance {
+		database, err := NewDatabaseFromDocumentDBClusterEndpoint(cluster)
+		if err != nil {
+			errors = append(errors, err)
+		} else {
+			databases = append(databases, database)
+		}
+	}
+
+	// Add a database from reader endpoint, if any reader instances.
+	if cluster.ReaderEndpoint != nil && hasReaderInstance {
+		database, err := NewDatabaseFromDocumentDBReaderEndpoint(cluster)
+		if err != nil {
+			errors = append(errors, err)
+		} else {
+			databases = append(databases, database)
+		}
+	}
+
+	// DocumentDB does not have custom endpoints.
+	return databases, trace.NewAggregate(errors...)
+}
+
+// NewDatabaseFromDocumentDBClusterEndpoint creates database resource from
+// DocumentDB cluster endpoint.
+func NewDatabaseFromDocumentDBClusterEndpoint(cluster *rds.DBCluster) (types.Database, error) {
+	endpointType := apiawsutils.DocumentDBClusterEndpoint
+	metadata, err := MetadataFromDocumentDBCluster(cluster, endpointType)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return types.NewDatabaseV3(
+		setAWSDBName(types.Metadata{
+			Description: fmt.Sprintf("DocumentDB cluster in %v", metadata.Region, endpointType),
+			Labels:      labelsFromDocumentDBCluster(cluster, metadata, endpointType),
+		}, aws.StringValue(cluster.DBClusterIdentifier)),
+		types.DatabaseSpecV3{
+			Protocol: types.DatabaseProtocolMongoDB,
+			URI:      fmt.Sprintf("%v:%v", aws.StringValue(cluster.Endpoint), aws.Int64Value(cluster.Port)),
+			AWS:      *metadata,
+		})
+}
+
+// NewDatabaseFromDocumentDBReaderEndpoint creates database resource from
+// DocumentDB reader endpoint.
+func NewDatabaseFromDocumentDBReaderEndpoint(cluster *rds.DBCluster) (types.Database, error) {
+	endpointType := apiawsutils.DocumentDBClusterReaderEndpoint
+	metadata, err := MetadataFromDocumentDBCluster(cluster, endpointType)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return types.NewDatabaseV3(
+		setAWSDBName(types.Metadata{
+			Description: fmt.Sprintf("DocumentDB cluster in %v (%v endpoint)", metadata.Region, endpointType),
+			Labels:      labelsFromDocumentDBCluster(cluster, metadata, endpointType),
+		}, aws.StringValue(cluster.DBClusterIdentifier), endpointType),
+		types.DatabaseSpecV3{
+			Protocol: types.DatabaseProtocolMongoDB,
+			URI:      fmt.Sprintf("%v:%v", aws.StringValue(cluster.ReaderEndpoint), aws.Int64Value(cluster.Port)),
+			AWS:      *metadata,
+		})
 }
 
 // NewDatabaseFromRDSProxy creates database resource from RDS Proxy.
@@ -1302,6 +1380,23 @@ func MetadataFromRDSCluster(rdsCluster *rds.DBCluster) (*types.AWS, error) {
 	}, nil
 }
 
+// MetadataFromDocumentDBCluster creates AWS metadata from the provided
+// DocumentDB cluster.
+func MetadataFromDocumentDBCluster(cluster *rds.DBCluster, endpointType string) (*types.AWS, error) {
+	parsedARN, err := arn.Parse(aws.StringValue(cluster.DBClusterArn))
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return &types.AWS{
+		Region:    parsedARN.Region,
+		AccountID: parsedARN.AccountID,
+		DocumentDB: types.DocumentDB{
+			ClusterID:    aws.StringValue(cluster.DBClusterIdentifier),
+			EndpointType: endpointType,
+		},
+	}, nil
+}
+
 // MetadataFromRDSProxy creates AWS metadata from the provided RDS Proxy.
 func MetadataFromRDSProxy(rdsProxy *rds.DBProxy) (*types.AWS, error) {
 	parsedARN, err := arn.Parse(aws.StringValue(rdsProxy.DBProxyArn))
@@ -1650,6 +1745,14 @@ func labelsFromRDSCluster(rdsCluster *rds.DBCluster, meta *types.AWS, endpointTy
 	return addLabels(labels, libcloudaws.TagsToLabels(rdsCluster.TagList))
 }
 
+func labelsFromDocumentDBCluster(cluster *rds.DBCluster, meta *types.AWS, endpointType string) map[string]string {
+	labels := labelsFromAWSMetadata(meta)
+	labels[types.DiscoveryLabelEngine] = aws.StringValue(cluster.Engine)
+	labels[types.DiscoveryLabelEngineVersion] = aws.StringValue(cluster.EngineVersion)
+	labels[types.DiscoveryLabelEndpointType] = endpointType
+	return addLabels(labels, libcloudaws.TagsToLabels(cluster.TagList))
+}
+
 // labelsFromRDSProxy creates database labels for the provided RDS Proxy.
 func labelsFromRDSProxy(rdsProxy *rds.DBProxy, meta *types.AWS, tags []*rds.Tag) map[string]string {
 	// rds.DBProxy has no TagList.
@@ -1781,6 +1884,20 @@ func IsRDSClusterSupported(cluster *rds.DBCluster) bool {
 	return true
 }
 
+// IsDocumentDBClusterSupported checks whether IAM authentication is supported
+// for this DocumentDB cluster.
+func IsDocumentDBClusterSupported(cluster *rds.DBCluster) bool {
+	ver, err := semver.NewVersion(aws.StringValue(cluster.EngineVersion))
+	if err != nil {
+		log.Errorf("Failed to parse DocumentDB engine version: %s", aws.StringValue(cluster.EngineVersion))
+		return false
+	}
+
+	// TODO(greedy52) add official link when available.
+	minIAMSupportedVer := semver.New("5.0.0")
+	return !ver.LessThan(*minIAMSupportedVer)
+}
+
 // IsElastiCacheClusterSupported checks whether the ElastiCache cluster is
 // supported.
 func IsElastiCacheClusterSupported(cluster *elasticache.ReplicationGroup) bool {
@@ -1837,7 +1954,7 @@ func IsRDSClusterAvailable(clusterStatus, clusterIndetifier *string) bool {
 	// https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/accessing-monitoring.html
 	switch aws.StringValue(clusterStatus) {
 	// Statuses marked as "Billed" in the above guide.
-	case "available", "backing-up", "backtracking", "failing-over",
+	case "active", "available", "backing-up", "backtracking", "failing-over",
 		"maintenance", "migrating", "modifying", "promoting", "renaming",
 		"resetting-master-credentials", "update-iam-db-auth", "upgrading":
 		return true
@@ -1858,6 +1975,13 @@ func IsRDSClusterAvailable(clusterStatus, clusterIndetifier *string) bool {
 		)
 		return true
 	}
+}
+
+// IsDocumentDBClusterAvailable checks if the DocumentDB cluster is available.
+func IsDocumentDBClusterAvailable(clusterStatus, clusterIndetifier *string) bool {
+	// List of status values for DocumentDB is a subset of RDS's list:
+	// https://docs.aws.amazon.com/documentdb/latest/developerguide/monitoring_docdb-cluster_status.html
+	return IsRDSClusterAvailable(clusterStatus, clusterIndetifier)
 }
 
 // IsRedshiftClusterAvailable checks if the Redshift cluster is available.
