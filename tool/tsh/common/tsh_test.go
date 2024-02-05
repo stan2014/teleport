@@ -3811,7 +3811,8 @@ func TestSerializeDatabases(t *testing.T) {
         "memorydb": {},
         "opensearch": {},
         "rdsproxy": {},
-        "redshift_serverless": {}
+        "redshift_serverless": {},
+        "docdb": {}
       },
       "mysql": {},
       "oracle": {
@@ -3843,7 +3844,8 @@ func TestSerializeDatabases(t *testing.T) {
         "memorydb": {},
         "opensearch": {},
         "rdsproxy": {},
-        "redshift_serverless": {}
+        "redshift_serverless": {},
+        "docdb": {}
       },
       "azure": {
 	    "redis": {}
