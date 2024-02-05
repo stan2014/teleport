@@ -991,7 +991,7 @@ func NewDatabaseFromDocumentDBClusterEndpoint(cluster *rds.DBCluster) (types.Dat
 	}
 	return types.NewDatabaseV3(
 		setAWSDBName(types.Metadata{
-			Description: fmt.Sprintf("DocumentDB cluster in %v", metadata.Region, endpointType),
+			Description: fmt.Sprintf("DocumentDB cluster in %v", metadata.Region),
 			Labels:      labelsFromDocumentDBCluster(cluster, metadata, endpointType),
 		}, aws.StringValue(cluster.DBClusterIdentifier)),
 		types.DatabaseSpecV3{

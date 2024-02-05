@@ -43,7 +43,8 @@ func newDocumentDBFetcher(cfg awsFetcherConfig) (common.Fetcher, error) {
 //
 // Note that AWS DocumentDB internally uses the RDS APIs:
 // https://github.com/aws/aws-sdk-go/blob/3248e69e16aa601ffa929be53a52439425257e5e/service/docdb/service.go#L33
-// The interfaces/structs in "services/docdb" are a subset of "services/rds".
+// The interfaces/structs in "services/docdb" are usually a subset of those in
+// "services/rds".
 type rdsDocumentDBFetcher struct{}
 
 func (f *rdsDocumentDBFetcher) ComponentShortName() string {

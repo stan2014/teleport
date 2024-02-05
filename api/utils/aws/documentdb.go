@@ -120,10 +120,17 @@ func guessDocumentDBEndpointType(endpointTypePart string) string {
 
 const (
 	// DocumentDBServiceName is the service name for AWS DocumentDB.
+	//
+	// TODO(greedy52) support DocuemntDB Elastic clusters when IAM Auth support
+	// is added. Note that Elastic clusters use "docdb-elastic" as the service
+	// name in the endpoint.
 	DocumentDBServiceName = "docdb"
 
-	// TODO
-	DocumentDBClusterEndpoint       = "cluster"
+	// DocumentDBClusterEndpoint specifies a DocumentDB primary/cluster
+	// endpoint.
+	DocumentDBClusterEndpoint = "cluster"
+	// DocumentDBReaderEndpoint specifies a DocumentDB reader endpoint.
 	DocumentDBClusterReaderEndpoint = "reader"
-	DocumentDBInstanceEndpoint      = "instance"
+	// DocumentDBInstanceEndpoint specifies a DocumentDB instance endpoint.
+	DocumentDBInstanceEndpoint = "instance"
 )
