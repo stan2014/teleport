@@ -18,7 +18,7 @@
 
 import cfg from 'teleport/config';
 
-import { StoreNav, StoreUserContext, StoreNotifications } from './stores';
+import { StoreNav, StoreNotifications, StoreUserContext } from './stores';
 import * as types from './types';
 import AuditService from './services/audit';
 import RecordingsService from './services/recordings';
@@ -69,6 +69,7 @@ class TeleportContext implements types.Context {
   // lockedFeatures are the features disabled in the user's cluster.
   // Mainly used to hide features and/or show CTAs when the user cluster doesn't support it.
   // TODO(mcbattirola): use cluster features instead of only using `isTeam`
+  // todo (michellescripts) [remove Team] https://github.com/gravitational/cloud/issues/7412
   // to determine which feature is locked
   lockedFeatures: types.LockedFeatures = {
     authConnectors: cfg.isTeam,

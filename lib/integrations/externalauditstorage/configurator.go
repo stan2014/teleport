@@ -181,6 +181,7 @@ func NewDraftConfigurator(ctx context.Context, ecaSvc ExternalAuditStorageGetter
 
 func newConfigurator(ctx context.Context, spec *externalauditstorage.ExternalAuditStorageSpec, integrationSvc services.IntegrationsGetter, alertService ClusterAlertService, optFns ...func(*Options)) (*Configurator, error) {
 	// ExternalAuditStorage is only available in Cloud Enterprise
+	// todo (michellescripts) [remove Team] https://github.com/gravitational/cloud/issues/7412
 	if !modules.GetModules().Features().Cloud || modules.GetModules().Features().IsTeam() {
 		return &Configurator{isUsed: false}, nil
 	}

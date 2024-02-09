@@ -225,6 +225,7 @@ func (f Features) IGSEnabled() bool {
 	return f.IdentityGovernanceSecurity
 }
 
+// todo (michellescripts) [remove Team] https://github.com/gravitational/cloud/issues/7412
 func (f Features) IsTeam() bool {
 	return f.ProductType == ProductTypeTeam
 }

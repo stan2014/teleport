@@ -4622,6 +4622,7 @@ func TestGetWebConfig_IGSFeatureLimits(t *testing.T) {
 			AccessListCreateLimit:               5,
 			AccessMonitoringMaxReportRangeLimit: 10,
 		},
+		// todo (michellescripts) [remove Team] https://github.com/gravitational/cloud/issues/7412
 		IsTeam:       true,
 		IsIGSEnabled: true,
 	}

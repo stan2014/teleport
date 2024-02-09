@@ -55,6 +55,7 @@ const cfg = {
   hideInaccessibleFeatures: false,
   customTheme: '',
   // isTeam is true if [Features.ProductType] == Team
+  // todo (michellescripts) [remove Team] https://github.com/gravitational/cloud/issues/7412
   isTeam: false,
   // isIgsEnabled refers to Identity Governance & Security product.
   // It refers to a group of features: access request, device trust,
