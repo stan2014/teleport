@@ -19,11 +19,11 @@ package services
 import (
 	"context"
 	"net/url"
+	"slices"
 
 	"github.com/crewjam/saml"
 	"github.com/gravitational/trace"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/exp/slices"
 
 	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/teleport/lib/utils"

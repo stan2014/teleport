@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -49,7 +50,6 @@ import (
 	"github.com/gravitational/trace"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/exp/slices"
 
 	"github.com/gravitational/teleport/api/defaults"
 	usageeventsv1 "github.com/gravitational/teleport/api/gen/proto/go/usageevents/v1"

@@ -36,6 +36,7 @@ import (
 	"math/big"
 	insecurerand "math/rand"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -52,7 +53,6 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/exp/maps"
-	"golang.org/x/exp/slices"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/types/known/durationpb"
 

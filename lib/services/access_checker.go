@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -25,7 +26,6 @@ import (
 	"github.com/gravitational/trace"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/exp/slices"
 
 	"github.com/gravitational/teleport/api/constants"
 	"github.com/gravitational/teleport/api/types"

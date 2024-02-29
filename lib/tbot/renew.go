@@ -22,12 +22,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/gravitational/trace"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
 
 	"github.com/gravitational/teleport"

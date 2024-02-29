@@ -31,6 +31,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -42,7 +43,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	otlp "go.opentelemetry.io/proto/otlp/trace/v1"
-	"golang.org/x/exp/slices"
 	yamlv2 "gopkg.in/yaml.v2"
 
 	"github.com/gravitational/teleport"

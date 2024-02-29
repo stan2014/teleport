@@ -21,10 +21,10 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/gravitational/trace"
-	"golang.org/x/exp/slices"
 
 	"github.com/gravitational/teleport/api/client/proto"
 	"github.com/gravitational/teleport/api/types"

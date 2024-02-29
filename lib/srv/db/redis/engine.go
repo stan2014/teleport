@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"slices"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -28,7 +29,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/memorydb"
 	"github.com/go-redis/redis/v9"
 	"github.com/gravitational/trace"
-	"golang.org/x/exp/slices"
 
 	"github.com/gravitational/teleport/api/types"
 	apiawsutils "github.com/gravitational/teleport/api/utils/aws"
