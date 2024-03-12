@@ -2058,7 +2058,7 @@ func (tc *TeleportClient) Join(ctx context.Context, mode types.SessionParticipan
 }
 
 // Play replays the recorded session.
-func (tc *TeleportClient) Play(ctx context.Context, sessionID string, speed float64) error {
+func (tc *TeleportClient) Play(ctx context.Context, sessionID string, speed float64, skipIdleTime bool) error {
 	ctx, span := tc.Tracer.Start(
 		ctx,
 		"teleportClient/Play",
@@ -2075,7 +2075,7 @@ func (tc *TeleportClient) Play(ctx context.Context, sessionID string, speed floa
 	}
 	defer clusterClient.Close()
 
-	return playSession(ctx, sessionID, speed, clusterClient.AuthClient)
+	return playSession(ctx, sessionID, speed, clusterClient.AuthClient, skipIdleTime)
 }
 
 const (
@@ -2088,7 +2088,7 @@ const (
 	keyDown  = 66
 )
 
-func playSession(ctx context.Context, sessionID string, speed float64, streamer player.Streamer) error {
+func playSession(ctx context.Context, sessionID string, speed float64, streamer player.Streamer, skipIdleTime bool) error {
 	sid, err := session.ParseID(sessionID)
 	if err != nil {
 		return trace.Wrap(err)
@@ -2112,8 +2112,9 @@ func playSession(ctx context.Context, sessionID string, speed float64, streamer 
 	term.SetCursorPos(1, 1)
 
 	player, err := player.New(&player.Config{
-		SessionID: *sid,
-		Streamer:  streamer,
+		SessionID:    *sid,
+		Streamer:     streamer,
+		SkipIdleTime: skipIdleTime,
 	})
 	if err != nil {
 		return trace.Wrap(err)
@@ -2202,9 +2203,9 @@ func setTermSize(w io.Writer, size string) error {
 }
 
 // PlayFile plays the recorded session from a file.
-func PlayFile(ctx context.Context, filename, sid string, speed float64) error {
+func PlayFile(ctx context.Context, filename, sid string, speed float64, skipIdleTime bool) error {
 	streamer := &playFromFileStreamer{filename: filename}
-	return playSession(ctx, sid, speed, streamer)
+	return playSession(ctx, sid, speed, streamer, skipIdleTime)
 }
 
 // SFTP securely copies files between Nodes or SSH servers using SFTP
