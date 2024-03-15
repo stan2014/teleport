@@ -37,6 +37,7 @@ import (
 	api "github.com/gravitational/teleport/gen/proto/go/teleport/lib/teleterm/v1"
 	"github.com/gravitational/teleport/lib/auth"
 	"github.com/gravitational/teleport/lib/client"
+	dtauthn "github.com/gravitational/teleport/lib/devicetrust/authn"
 	"github.com/gravitational/teleport/lib/teleterm/api/uri"
 	"github.com/gravitational/teleport/lib/teleterm/clusters"
 	"github.com/gravitational/teleport/lib/teleterm/cmd"
@@ -1071,6 +1072,25 @@ func (s *Service) UpdateUserPreferences(ctx context.Context, clusterURI uri.Reso
 	})
 
 	return preferences, trace.Wrap(err)
+}
+
+func (s *Service) AuthenticateWebDevice(ctx context.Context, req *api.AuthenticateWebDeviceRequest) (*api.AuthenticateWebDeviceResponse, error) {
+	clusterURI, err := uri.Parse(req.ClusterUri)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	proxyClient, err := s.GetCachedClient(ctx, clusterURI.GetRootClusterURI())
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	devicesClient := proxyClient.CurrentCluster().DevicesClient()
+
+	ceremony := dtauthn.NewCeremony()
+	if err := ceremony.RunWeb(ctx, devicesClient, req.DeviceWebToken); err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return &api.AuthenticateWebDeviceResponse{}, nil
 }
 
 func (s *Service) shouldReuseGateway(targetURI uri.ResourceURI) (gateway.Gateway, bool) {
