@@ -1214,6 +1214,10 @@ export interface AuthenticateWebDeviceRequest {
      * @generated from protobuf field: teleport.devicetrust.v1.DeviceWebToken device_web_token = 1;
      */
     deviceWebToken?: DeviceWebToken;
+    /**
+     * @generated from protobuf field: string cluster_uri = 2;
+     */
+    clusterUri: string;
 }
 /**
  * Response for AuthenticateWebDevice.
@@ -5410,11 +5414,13 @@ export const UserPreferences = new UserPreferences$Type();
 class AuthenticateWebDeviceRequest$Type extends MessageType<AuthenticateWebDeviceRequest> {
     constructor() {
         super("teleport.lib.teleterm.v1.AuthenticateWebDeviceRequest", [
-            { no: 1, name: "device_web_token", kind: "message", T: () => DeviceWebToken }
+            { no: 1, name: "device_web_token", kind: "message", T: () => DeviceWebToken },
+            { no: 2, name: "cluster_uri", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<AuthenticateWebDeviceRequest>): AuthenticateWebDeviceRequest {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.clusterUri = "";
         if (value !== undefined)
             reflectionMergePartial<AuthenticateWebDeviceRequest>(this, message, value);
         return message;
@@ -5426,6 +5432,9 @@ class AuthenticateWebDeviceRequest$Type extends MessageType<AuthenticateWebDevic
             switch (fieldNo) {
                 case /* teleport.devicetrust.v1.DeviceWebToken device_web_token */ 1:
                     message.deviceWebToken = DeviceWebToken.internalBinaryRead(reader, reader.uint32(), options, message.deviceWebToken);
+                    break;
+                case /* string cluster_uri */ 2:
+                    message.clusterUri = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -5442,6 +5451,9 @@ class AuthenticateWebDeviceRequest$Type extends MessageType<AuthenticateWebDevic
         /* teleport.devicetrust.v1.DeviceWebToken device_web_token = 1; */
         if (message.deviceWebToken)
             DeviceWebToken.internalBinaryWrite(message.deviceWebToken, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* string cluster_uri = 2; */
+        if (message.clusterUri !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.clusterUri);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
