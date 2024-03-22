@@ -262,7 +262,36 @@ func getProperty[TEnv any](mapVal, keyVal any) (any, error) {
 	if dynamicMap, ok := mapVal.(indexExpressionBuilder[TEnv]); ok {
 		return dynamicMap.buildIndexExpression(keyExpr), nil
 	}
+	if mapExpr, ok := mapVal.(Expression[TEnv, any]); ok {
+		return untypedMapExpr[TEnv]{mapExpr, keyExpr}, nil
+	}
 	return nil, trace.Wrap(unexpectedTypeError[map[string]string](mapVal), "cannot take index of unexpected type")
+}
+
+type untypedMapExpr[TEnv any] struct {
+	mapExpr Expression[TEnv, any]
+	keyExpr Expression[TEnv, string]
+}
+
+func (u untypedMapExpr[TEnv]) Evaluate(env TEnv) (any, error) {
+	k, err := u.keyExpr.Evaluate(env)
+	if err != nil {
+		return nil, trace.Wrap(err, "evaluating key of index expression")
+	}
+	m, err := u.mapExpr.Evaluate(env)
+	if err != nil {
+		return nil, trace.Wrap(err, "evaluating base of index expression")
+	}
+	switch typedMap := m.(type) {
+	case map[string]string:
+		return typedMap[k], nil
+	case map[string][]string:
+		return typedMap[k], nil
+	case map[string]any:
+		return typedMap[k], nil
+	default:
+		return nil, trace.Wrap(unexpectedTypeError[map[string]any](u.mapExpr), "cannot take index of unexpected type")
+	}
 }
 
 type propertyExpr[TEnv, TValues any] struct {
