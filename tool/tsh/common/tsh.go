@@ -631,6 +631,7 @@ const (
 	proxyKubeConfigEnvVar    = "TELEPORT_KUBECONFIG"
 	noResumeEnvVar           = "TELEPORT_NO_RESUME"
 	requestModeEnvVar        = "TELEPORT_REQUEST_MODE"
+	toolsVersionEnvVar       = "TELEPORT_TOOLS_VERSION"
 
 	clusterHelp = "Specify the Teleport cluster to connect"
 	browserHelp = "Set to 'none' to suppress browser opening on login"
@@ -1920,6 +1921,20 @@ func onLogin(cf *CLIConf) error {
 
 	if cf.Username == "" {
 		cf.Username = tc.Username
+	}
+
+	// Check if the version required by the cluster is different than the
+	// running binary. If it is, download the update and re-exec.
+	ok, err := update()
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	if ok {
+		code, err := reexec()
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		os.Exit(code)
 	}
 
 	// stdin hijack is OK for login, since it tsh doesn't read input after the
