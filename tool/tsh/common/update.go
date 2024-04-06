@@ -20,12 +20,8 @@ package common
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/gravitational/teleport"
-	"github.com/gravitational/trace"
-
-	"github.com/coreos/go-semver/semver"
 )
 
 func update() (bool, error) {
@@ -37,16 +33,16 @@ func update() (bool, error) {
 	fmt.Printf("--> teleport.Version: %v\n", teleport.Version)
 	fmt.Printf("--> teleport.SemVersion: %v\n", teleport.SemVersion)
 
-	toolsVersion, err := semver.NewVersion(os.Getenv(toolsVersionEnvVar))
-	if err != nil {
-		return false, trace.Wrap(err)
-	}
-	if toolsVersion.Equal(teleport.SemVersion) {
-		log.Debugf("TELEPORT_TOOLS_VERSION matches version of running binary: %v.", toolsVersion)
-		return false, nil
-	}
+	//toolsVersion, err := semver.NewVersion(os.Getenv(toolsVersionEnvVar))
+	//if err != nil {
+	//	return trace.Wrap(err)
+	//}
+	//if toolsVersion.Equal(teleport.SemVersion) {
+	//	log.Debugf("TELEPORT_TOOLS_VERSION matches version of running binary: %v.", toolsVersion)
+	//	return nil
+	//}
 
-	return true, nil
+	return false, nil
 }
 
 func reexec() (int, error) {

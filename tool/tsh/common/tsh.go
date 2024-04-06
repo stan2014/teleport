@@ -675,6 +675,22 @@ func initLogger(cf *CLIConf) {
 //
 // DO NOT RUN TESTS that call Run() in parallel (unless you taken precautions).
 func Run(ctx context.Context, args []string, opts ...CliOption) error {
+	// TODO(russjones): Before anything else check if this logged in session is
+	// pinned to a different version of tsh. This needs to be done so the
+	// correct version of flags are parsed and the correct subcommand (tsh ssh)
+	// is executed.
+
+	// TODO(russjones): Do we only update upon `tsh login --proxy`? I don't
+	// think so, we should update upon any `tsh login` to allow update of
+	// binary. So here we need to read in the logged in profile and CLI flags.
+	if checkUpdate() {
+		code, err := reexec()
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		os.Exit(code)
+	}
+
 	cf := CLIConf{
 		Context:         ctx,
 		TracingProvider: tracing.NoopProvider(),
@@ -1815,6 +1831,24 @@ func onLogin(cf *CLIConf) error {
 	}
 	tc.HomePath = cf.HomePath
 
+	// TODO(russjones): The user has typed in `tsh login`, `tsh login
+	// proxyName`, or `tsh login --proxy`. This is where we hook downloading
+	// and updating the binary mapping.
+	//
+	// If the version of the running binary differs from the version required
+	// by the cluster, reexec the mapped version and exit this process with the
+	// same exit code as the child process.
+	if exit, err := update(); err != nil {
+		return trace.Wrap(err)
+	}
+	if exit {
+		code, err := reexec()
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		os.Exit(code)
+	}
+
 	// client is already logged in and profile is not expired
 	if profile != nil && !profile.IsExpired(clockwork.NewRealClock()) {
 		switch {
@@ -1921,20 +1955,6 @@ func onLogin(cf *CLIConf) error {
 
 	if cf.Username == "" {
 		cf.Username = tc.Username
-	}
-
-	// Check if the version required by the cluster is different than the
-	// running binary. If it is, download the update and re-exec.
-	ok, err := update()
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	if ok {
-		code, err := reexec()
-		if err != nil {
-			return trace.Wrap(err)
-		}
-		os.Exit(code)
 	}
 
 	// stdin hijack is OK for login, since it tsh doesn't read input after the
