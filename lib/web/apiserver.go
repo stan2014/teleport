@@ -839,6 +839,9 @@ func (h *Handler) bindDefaultEndpoints() {
 	// TODO(bl-nero): DELETE IN 17.0.0
 	h.POST("/webapi/mfa/authenticatechallenge/password", h.WithAuth(h.createAuthenticateChallengeWithPassword))
 
+	// Device Trust.
+	h.GET("/webapi/device/webconfirm", h.WithAuthCookieAndCSRF(h.deviceWebConfirm))
+
 	// trusted clusters
 	h.POST("/webapi/trustedclusters/validate", h.WithUnauthenticatedLimiter(h.validateTrustedCluster))
 
