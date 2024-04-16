@@ -99,6 +99,22 @@ func FromProto(msg *accesslistv1.AccessList, opts ...AccessListOption) (*accessl
 		*memberCount = *msg.Status.MemberCount
 	}
 
+	var parentMemberAccessLists []accesslist.AccessListRef
+	for _, al := range msg.Spec.MemberAccessLists {
+		parentMemberAccessLists = append(parentMemberAccessLists, accesslist.AccessListRef{
+			Name:  al.Name,
+			Title: al.Title,
+		})
+	}
+
+	var parentOwnerAccessLists []accesslist.AccessListRef
+	for _, al := range msg.Spec.OwnerAccessLists {
+		parentOwnerAccessLists = append(parentOwnerAccessLists, accesslist.AccessListRef{
+			Name:  al.Name,
+			Title: al.Title,
+		})
+	}
+
 	accessList, err := accesslist.NewAccessList(headerv1.FromMetadataProto(msg.Header.Metadata), accesslist.Spec{
 		Title:       msg.Spec.Title,
 		Description: msg.Spec.Description,
@@ -120,7 +136,9 @@ func FromProto(msg *accesslistv1.AccessList, opts ...AccessListOption) (*accessl
 			Roles:  msg.Spec.Grants.Roles,
 			Traits: traitv1.FromProto(msg.Spec.Grants.Traits),
 		},
-		OwnerGrants: ownerGrants,
+		OwnerGrants:       ownerGrants,
+		OwnerAccessLists:  parentOwnerAccessLists,
+		MemberAccessLists: parentMemberAccessLists,
 	})
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -177,6 +195,20 @@ func ToProto(accessList *accesslist.AccessList) *accesslistv1.AccessList {
 		memberCount = new(uint32)
 		*memberCount = *accessList.Status.MemberCount
 	}
+	var memberAccessListRefs []*accesslistv1.AccessListRef
+	for _, al := range accessList.Spec.MemberAccessLists {
+		memberAccessListRefs = append(memberAccessListRefs, &accesslistv1.AccessListRef{
+			Name:  al.Name,
+			Title: al.Title,
+		})
+	}
+	var ownerAccessListRefs []*accesslistv1.AccessListRef
+	for _, al := range accessList.Spec.OwnerAccessLists {
+		ownerAccessListRefs = append(ownerAccessListRefs, &accesslistv1.AccessListRef{
+			Name:  al.Name,
+			Title: al.Title,
+		})
+	}
 
 	return &accesslistv1.AccessList{
 		Header: headerv1.ToResourceHeaderProto(accessList.ResourceHeader),
@@ -206,7 +238,9 @@ func ToProto(accessList *accesslist.AccessList) *accesslistv1.AccessList {
 				Roles:  accessList.Spec.Grants.Roles,
 				Traits: traitv1.ToProto(accessList.Spec.Grants.Traits),
 			},
-			OwnerGrants: ownerGrants,
+			OwnerGrants:       ownerGrants,
+			MemberAccessLists: memberAccessListRefs,
+			OwnerAccessLists:  ownerAccessListRefs,
 		},
 		Status: &accesslistv1.AccessListStatus{
 			MemberCount: memberCount,

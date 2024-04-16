@@ -71,6 +71,23 @@ message AccessListSpec {
 
   // owner_grants describes the access granted by owners to this access list.
   AccessListGrants owner_grants = 11;
+
+  // member_access_lists is a list of access lists that user
+  // membership should be fetched from
+  repeated AccessListRef member_access_lists = 12;
+
+  // owner_access_lists is a list of access lists that owner
+  // membership should be fetched from
+  repeated AccessListRef owner_access_lists = 13;
+}
+
+// AccessListRef contains information about access lists included
+// as references in an access list
+message AccessListRef {
+  // name is the id of the parent access list
+  string name = 1;
+  // title is the title of the parent access list
+  string title = 2;
 }
 
 // AccessListOwner is an owner of an access list.

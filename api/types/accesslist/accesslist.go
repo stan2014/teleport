@@ -155,6 +155,14 @@ type Spec struct {
 
 	// OwnerGrants describes the access granted by ownership of this access list.
 	OwnerGrants Grants `json:"owner_grants" yaml:"owner_grants"`
+
+	// MemberAccessLists is a list of AccessList ids that user membership
+	// should be fetched from
+	MemberAccessLists []AccessListRef `json:"member_access_lists" yaml:"member_access_lists"`
+
+	// OwnerAccessLists is a list of AccessLists that owner membership
+	// should be fetched from
+	OwnerAccessLists []AccessListRef `json:"owner_access_lists" yaml:"owner_access_lists"`
 }
 
 // Owner is an owner of an access list.
@@ -225,6 +233,11 @@ type Grants struct {
 type Status struct {
 	// MemberCount is the number of members in the access list.
 	MemberCount *uint32
+}
+
+type AccessListRef struct {
+	Name  string `json:"name" yaml:"name"`
+	Title string `json:"title" yaml:"title"`
 }
 
 // NewAccessList will create a new access list.
@@ -308,6 +321,15 @@ func (a *AccessList) CheckAndSetDefaults() error {
 		deduplicatedOwners = append(deduplicatedOwners, owner)
 	}
 	a.Spec.Owners = deduplicatedOwners
+
+	for _, memberACL := range append(a.Spec.MemberAccessLists, a.Spec.OwnerAccessLists...) {
+		if memberACL.Name == "" {
+			return trace.BadParameter("access list name is missing")
+		}
+		if memberACL.Title == "" {
+			return trace.BadParameter("access list title is missing")
+		}
+	}
 
 	return nil
 }
