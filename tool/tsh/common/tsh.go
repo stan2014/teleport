@@ -683,8 +683,22 @@ func Run(ctx context.Context, args []string, opts ...CliOption) error {
 	// TODO(russjones): Do we only update upon `tsh login --proxy`? I don't
 	// think so, we should update upon any `tsh login` to allow update of
 	// binary. So here we need to read in the logged in profile and CLI flags.
-	if checkUpdate() {
-		code, err := reexec()
+
+	// At process startup, get the current-profile and fetch the version of
+	// client tools required by the cluster. If automatic updates is enabled
+	// and the version differs from the running binary, download and re-execute
+	// correct binary. But the problem is if we store everyone in TSH_HOME
+	// there is no longer a current-profile??
+	toolsVersion, reexec := update.check()
+	if reexec {
+		// Download the version of client tools required by the cluster.
+		// Download may be a NOP if tools is already downloaded.
+		if err := update.download(); err != nil {
+			return trace.Wrap(err)
+		}
+
+		// Re-execute client tools with the correct version of client tools.
+		code, err := update.reexec(proxyName, toolsVersion)
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -1838,11 +1852,11 @@ func onLogin(cf *CLIConf) error {
 	// If the version of the running binary differs from the version required
 	// by the cluster, reexec the mapped version and exit this process with the
 	// same exit code as the child process.
-	if exit, err := update(); err != nil {
+	if exit, err := update.update(); err != nil {
 		return trace.Wrap(err)
 	}
 	if exit {
-		code, err := reexec()
+		code, err := update.reexec()
 		if err != nil {
 			return trace.Wrap(err)
 		}

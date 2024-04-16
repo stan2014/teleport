@@ -16,13 +16,28 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package common
+package update
 
 import (
 	"fmt"
 
 	"github.com/gravitational/teleport"
 )
+
+func check() bool {
+	// find logged in profile from current-profile.
+
+	proxyName := update.readFlagsAndConfig()
+	toolsVersion := update.getToolsVersion()
+	if teleport.Version != toolsVersion {
+		return update
+	}
+	for _, arg := range args {
+		if strings.StartsWith(arg, "--proxy") {
+		}
+	}
+
+}
 
 func update() (bool, error) {
 	// TODO(russjones): Hook automatic updates here. Check ping response stored
