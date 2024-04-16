@@ -137,6 +137,12 @@ func (ImplicitAccessListError) Error() string {
 	return "requested AccessList does not have explicit member list"
 }
 
+// AccessListGetter defines an interface that can retrieve an access list.
+type AccessListGetter interface {
+	// GetAccessList returns the specified access list resource.
+	GetAccessList(context.Context, string) (*accesslist.AccessList, error)
+}
+
 // AccessListMemberGetter defines an interface that can retrieve access list members.
 type AccessListMemberGetter interface {
 	// GetAccessListMember returns the specified access list member resource.
@@ -251,18 +257,74 @@ func IsAccessListOwner(identity tlsca.Identity, accessList *accesslist.AccessLis
 // AccessListMembershipChecker will check if users are members of an access list and
 // makes sure the user is not locked and meets membership requirements.
 type AccessListMembershipChecker struct {
-	members AccessListMemberGetter
-	locks   LockGetter
-	clock   clockwork.Clock
+	members    AccessListMemberGetter
+	accessList AccessListGetter
+	locks      LockGetter
+	clock      clockwork.Clock
 }
 
 // NewAccessListMembershipChecker will create a new access list membership checker.
-func NewAccessListMembershipChecker(clock clockwork.Clock, members AccessListMemberGetter, locks LockGetter) *AccessListMembershipChecker {
+func NewAccessListMembershipChecker(clock clockwork.Clock, members AccessListMemberGetter, accessLists AccessListGetter, locks LockGetter) *AccessListMembershipChecker {
 	return &AccessListMembershipChecker{
-		members: members,
-		locks:   locks,
-		clock:   clock,
+		accessList: accessLists,
+		members:    members,
+		locks:      locks,
+		clock:      clock,
 	}
+}
+
+func (a AccessListMembershipChecker) recursiveIsAccessListMemberCheck(ctx context.Context, identity tlsca.Identity, accessList *accesslist.AccessList) error {
+	username := identity.Username
+	seen := map[string]struct{}{}
+	seen[accessList.GetName()] = struct{}{}
+
+	queue := make([]accesslist.AccessListRef, len(accessList.Spec.MemberAccessLists))
+	copy(queue, accessList.Spec.MemberAccessLists)
+	for len(queue) > 0 {
+		size := len(queue)
+		for i := 0; i < size; i++ {
+			pal := queue[0]
+			queue = queue[1:]
+
+			member, err := a.members.GetAccessListMember(ctx, pal.Name, username)
+			if trace.IsNotFound(err) {
+				subAccessList, err := a.accessList.GetAccessList(ctx, pal.Name)
+				if err != nil {
+					return trace.Wrap(err)
+				}
+				for _, next := range subAccessList.Spec.MemberAccessLists {
+					if _, ok := seen[next.Name]; ok {
+						continue
+					}
+					seen[next.Name] = struct{}{}
+					queue = append(queue, next)
+				}
+			} else if err != nil {
+				// Some other error has occurred
+				return trace.Wrap(err)
+			}
+			if member == nil {
+				continue
+			}
+
+			expires := member.Spec.Expires
+			if !expires.IsZero() && !a.clock.Now().Before(expires) {
+				return trace.AccessDenied("user %s's membership has expired in the access list", username)
+			}
+
+			subAccessList, err := a.accessList.GetAccessList(ctx, pal.Name)
+			if err != nil {
+				return trace.Wrap(err)
+			}
+			if !UserMeetsRequirements(identity, subAccessList.Spec.MembershipRequires) {
+				return trace.AccessDenied("user %s is a member, but does not have the roles or traits required to be a member of this list", username)
+			} else {
+				return nil
+			}
+		}
+
+	}
+	return nil
 }
 
 // IsAccessListMember will return true if the user is a member for the current list.
@@ -284,12 +346,15 @@ func (a AccessListMembershipChecker) IsAccessListMember(ctx context.Context, ide
 	}
 
 	member, err := a.members.GetAccessListMember(ctx, accessList.GetName(), username)
-	if trace.IsNotFound(err) {
-		// The member has not been found, so we know they're not a member of this list.
-		return trace.NotFound("user %s is not a member of the access list", username)
-	} else if err != nil {
-		// Some other error has occurred
+	if err != nil && !trace.IsNotFound(err) {
 		return trace.Wrap(err)
+	}
+
+	if trace.IsNotFound(err) {
+		if err := a.recursiveIsAccessListMemberCheck(ctx, identity, accessList); err != nil {
+			return trace.Wrap(err)
+		}
+		return nil
 	}
 
 	expires := member.Spec.Expires
@@ -305,13 +370,14 @@ func (a AccessListMembershipChecker) IsAccessListMember(ctx context.Context, ide
 }
 
 // TODO(mdwn): Remove this in favor of using the access list membership checker.
-func IsAccessListMember(ctx context.Context, identity tlsca.Identity, clock clockwork.Clock, accessList *accesslist.AccessList, members AccessListMemberGetter) error {
+func IsAccessListMember(ctx context.Context, identity tlsca.Identity, clock clockwork.Clock, accessList *accesslist.AccessList, accessListGetter AccessListGetter, members AccessListMemberGetter) error {
 	// See if the member getter also implements lock getter. If so, use it. Otherwise, nil is fine.
 	lockGetter, _ := members.(LockGetter)
 	return AccessListMembershipChecker{
-		members: members,
-		locks:   lockGetter,
-		clock:   clock,
+		accessList: accessListGetter,
+		members:    members,
+		locks:      lockGetter,
+		clock:      clock,
 	}.IsAccessListMember(ctx, identity, accessList)
 }
 
