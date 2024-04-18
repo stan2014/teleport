@@ -318,13 +318,13 @@ func (a AccessListMembershipChecker) recursiveIsAccessListMemberCheck(ctx contex
 			}
 			if !UserMeetsRequirements(identity, subAccessList.Spec.MembershipRequires) {
 				return trace.AccessDenied("user %s is a member, but does not have the roles or traits required to be a member of this list", username)
-			} else {
-				return nil
 			}
+
+			return nil
 		}
 
 	}
-	return nil
+	return trace.NotFound("user %s is not a member of the access list", username)
 }
 
 // IsAccessListMember will return true if the user is a member for the current list.
@@ -349,12 +349,21 @@ func (a AccessListMembershipChecker) IsAccessListMember(ctx context.Context, ide
 	if err != nil && !trace.IsNotFound(err) {
 		return trace.Wrap(err)
 	}
-
 	if trace.IsNotFound(err) {
-		if err := a.recursiveIsAccessListMemberCheck(ctx, identity, accessList); err != nil {
+		// try find if the user could be a member of any lists by recursing
+		err := a.recursiveIsAccessListMemberCheck(ctx, identity, accessList)
+		if trace.IsNotFound(err) {
+			// The member has not been found, so we know they're not a member of this list.
+			return trace.NotFound("user %s is not a member of the access list", username)
+		}
+		if err != nil {
+			// Some other error has occurred
 			return trace.Wrap(err)
 		}
 		return nil
+	} else if err != nil {
+		// Some other error has occurred
+		return trace.Wrap(err)
 	}
 
 	expires := member.Spec.Expires

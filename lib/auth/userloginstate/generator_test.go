@@ -391,6 +391,38 @@ func TestAccessLists(t *testing.T) {
 			expectedRoleCount:  1,
 			expectedTraitCount: 6,
 		},
+		{
+			name:  "access lists member of sub list",
+			cloud: true,
+			user:  userNoRolesOrTraits,
+			// user is member of acl 3, acl 1 includes acl 2, which includes acl 2 and 3
+			// so user will be granted role1 and 2, and trait1
+			accessLists: []*accesslist.AccessList{
+				newAccessListsWithMemberRefs(t, clock, "1", grants([]string{"role1"},
+					trait.Traits{
+						"trait1": {"value"},
+					}),
+					emptyGrants,
+					[]accesslist.AccessListRef{{Name: "2", Title: "title"}}),
+				newAccessListsWithMemberRefs(t, clock, "2", grants([]string{"role1"}, trait.Traits{}),
+					emptyGrants,
+					[]accesslist.AccessListRef{{Name: "3", Title: "title"}, {Name: "2", Title: "title"}}),
+				newAccessList(t, clock, "3", grants([]string{"role2"}, trait.Traits{}), emptyGrants),
+			},
+			members: newAccessListMembers(t, clock, "3", "user"),
+			roles:   []string{"role1", "role2"},
+			wantErr: require.NoError,
+			expected: newUserLoginState(t, "user",
+				map[string]string{
+					userloginstate.OriginalRolesAndTraitsSet: "true",
+				},
+				nil,
+				nil,
+				[]string{"role1", "role2"},
+				trait.Traits{"trait1": {"value"}}),
+			expectedRoleCount:  2,
+			expectedTraitCount: 1,
+		},
 	}
 
 	for _, test := range tests {
@@ -497,6 +529,12 @@ func grants(roles []string, traits trait.Traits) accesslist.Grants {
 		Roles:  roles,
 		Traits: traits,
 	}
+}
+
+func newAccessListsWithMemberRefs(t *testing.T, clock clockwork.Clock, name string, grants accesslist.Grants, ownerGrants accesslist.Grants, memberlists []accesslist.AccessListRef) *accesslist.AccessList {
+	acl := newAccessList(t, clock, name, grants, ownerGrants)
+	acl.Spec.MemberAccessLists = memberlists
+	return acl
 }
 
 func newAccessList(t *testing.T, clock clockwork.Clock, name string, grants accesslist.Grants, ownerGrants accesslist.Grants) *accesslist.AccessList {

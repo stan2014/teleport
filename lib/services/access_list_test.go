@@ -271,6 +271,11 @@ type testMembersAndLockGetter struct {
 	locks   map[string]types.Lock
 }
 
+// GetAccessList implements AccessListGetter.
+func (t *testMembersAndLockGetter) GetAccessList(context.Context, string) (*accesslist.AccessList, error) {
+	return nil, trace.NotImplemented("not implemented")
+}
+
 // ListAccessListMembers returns a paginated list of all access list members.
 func (t *testMembersAndLockGetter) ListAccessListMembers(ctx context.Context, accessList string, _ int, _ string) (members []*accesslist.AccessListMember, nextToken string, err error) {
 	for _, member := range t.members[accessList] {
@@ -489,7 +494,7 @@ func TestIsAccessListMemberChecker(t *testing.T) {
 			}
 			getter := &testMembersAndLockGetter{members: memberMap, locks: test.locks}
 
-			checker := NewAccessListMembershipChecker(clockwork.NewFakeClockAt(test.currentTime), getter, getter)
+			checker := NewAccessListMembershipChecker(clockwork.NewFakeClockAt(test.currentTime), getter, getter, getter)
 			test.errAssertionFunc(t, checker.IsAccessListMember(ctx, test.identity, accessList))
 		})
 	}
