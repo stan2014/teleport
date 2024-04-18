@@ -690,20 +690,22 @@ func Run(ctx context.Context, args []string, opts ...CliOption) error {
 	// and the version differs from the running binary, download and re-execute
 	// correct binary. But the problem is if we store everyone in TSH_HOME
 	// there is no longer a current-profile??
-	toolsVersion, reexec := update.Check()
+	_, reexec := update.Check()
 	if reexec {
-		// Download the version of client tools required by the cluster.
-		// Download may be a NOP if tools is already downloaded.
-		if err := update.Download(toolsVersion); err != nil {
-			return trace.Wrap(err)
-		}
+		//// Download the version of client tools required by the cluster.
+		//// Download may be a NOP if tools is already downloaded.
+		//if err := update.Download(toolsVersion); err != nil {
+		//	return trace.Wrap(err)
+		//}
 
 		// Re-execute client tools with the correct version of client tools.
 		code, err := update.Exec()
 		if err != nil {
-			return trace.Wrap(err)
+			log.Debugf("--> err: %v", err)
+			//return trace.Wrap(err)
+		} else {
+			os.Exit(code)
 		}
-		os.Exit(code)
 	}
 
 	cf := CLIConf{
@@ -1863,6 +1865,22 @@ func onLogin(cf *CLIConf) error {
 	//	}
 	//	os.Exit(code)
 	//}
+
+	toolsVersion, reexec := update.Check()
+	if reexec {
+		// Download the version of client tools required by the cluster.
+		// Download may be a NOP if tools is already downloaded.
+		if err := update.Download(toolsVersion); err != nil {
+			return trace.Wrap(err)
+		}
+
+		// Re-execute client tools with the correct version of client tools.
+		code, err := update.Exec()
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		os.Exit(code)
+	}
 
 	//toolsVersion, reexec := update.check()
 	//if reexec {

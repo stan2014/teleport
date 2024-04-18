@@ -1,6 +1,6 @@
 /*
  * Teleport
- * Copyright (C) 2023  Gravitational, Inc.
+ * Copyright (C) 2024  Gravitational, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -19,8 +19,14 @@
 package update
 
 import (
+	"archive/tar"
 	"bufio"
 	"bytes"
+	"compress/gzip"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,6 +93,87 @@ func Check() (string, bool) {
 // TODO(russjones): If you specify TELEPORT_TOOLS_VERSION, should that download
 // to a temp location and not overide ~/.tsh/bin?
 func Download(toolsVersion string) error {
+	// TODO(russjones): be edition aware.
+	// TODO(russjones): wipe out old version?
+
+	dir := "/Users/rjones/.tsh/bin"
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("https://cdn.teleport.dev/teleport-v%v-darwin-arm64-bin.tar.gz", toolsVersion)
+	// Create an HTTP client that follows redirects
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return nil
+		},
+	}
+
+	// TODO(russjones): print progress here.
+	resp, err := client.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// TODO(russjones): fix this so the body can be used twice.
+	//// Get the expected hash from the hashURL
+	//expectedHashResp, err := http.Get(url + ".sha256")
+	//if err != nil {
+	//	return err
+	//}
+	//defer expectedHashResp.Body.Close()
+	//expectedHash, err := ioutil.ReadAll(expectedHashResp.Body)
+	//if err != nil {
+	//	return err
+	//}
+
+	//expectedHashString := strings.TrimSpace(string(expectedHash))
+	//parts := strings.Split(expectedHashString, " ")
+	//expectedHash = []byte(parts[0])
+
+	//// Check the hash of the file
+	//hash := sha256.New()
+	//if _, err := io.Copy(hash, resp.Body); err != nil {
+	//	return err
+	//}
+	//if fmt.Sprintf("%x", hash.Sum(nil)) != string(expectedHash) {
+	//	return fmt.Errorf("hash mismatch")
+	//}
+
+	// Decompress the file
+	gzipReader, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return err
+	}
+	tarReader := tar.NewReader(gzipReader)
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		// TODO(russjones): tbot?
+		if header.Name != "teleport/tctl" && header.Name != "teleport/tsh" {
+			if _, err := io.Copy(ioutil.Discard, tarReader); err != nil {
+				fmt.Printf("--> discard: %v\n")
+			}
+			continue
+		}
+
+		filename := filepath.Join(dir, strings.TrimPrefix(header.Name, "teleport/"))
+		file, err := os.Create(filename)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(file, tarReader)
+		if err != nil {
+			return err
+		}
+		if err := file.Chmod(os.FileMode(0755)); err != nil {
+			return err
+		}
+		fmt.Printf("--> wrote %v\n", filename)
+	}
 	return nil
 }
 
@@ -107,6 +194,7 @@ func Exec() (int, error) {
 
 	if err := cmd.Run(); err != nil {
 		// TODO(russjones): better error code here
+		fmt.Printf("--> trying to exec err: %v\n", err)
 		return 0, trace.Wrap(err)
 	}
 
