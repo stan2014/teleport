@@ -1,0 +1,10 @@
+1. Check migration path. Someone already logged in to Teleport, suddenly upgrads, then what happens?
+
+different login flows
+check inline-logins
+check connecting to multiple different clusters
+macos unpack pkg
+different commands
+errors and warnings
+check stdout,stderr are split
+tctl auth local

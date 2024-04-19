@@ -690,7 +690,7 @@ func Run(ctx context.Context, args []string, opts ...CliOption) error {
 	// and the version differs from the running binary, download and re-execute
 	// correct binary. But the problem is if we store everyone in TSH_HOME
 	// there is no longer a current-profile??
-	_, reexec := update.Check()
+	toolsVersion, reexec := update.Check()
 	if reexec {
 		//// Download the version of client tools required by the cluster.
 		//// Download may be a NOP if tools is already downloaded.
@@ -699,9 +699,10 @@ func Run(ctx context.Context, args []string, opts ...CliOption) error {
 		//}
 
 		// Re-execute client tools with the correct version of client tools.
+		fmt.Printf("--> [INIT] will rexec with: %v.\n", toolsVersion)
 		code, err := update.Exec()
 		if err != nil {
-			log.Debugf("--> err: %v", err)
+			log.Debugf("--> [INIT] err: %v", err)
 			//return trace.Wrap(err)
 		} else {
 			os.Exit(code)
@@ -1687,7 +1688,7 @@ func initializeTracing(cf *CLIConf) func() {
 	}
 
 	var provider *tracing.Provider
-	if err := client.RetryWithRelogin(cf.Context, tc, func() error {
+	if err := retryWithRelogin(cf.Context, tc, func() error {
 		clt, err := tc.NewTracingClient(cf.Context)
 		if err != nil {
 			return trace.Wrap(err)
@@ -1866,20 +1867,25 @@ func onLogin(cf *CLIConf) error {
 	//	os.Exit(code)
 	//}
 
-	toolsVersion, reexec := update.Check()
-	if reexec {
-		// Download the version of client tools required by the cluster.
-		// Download may be a NOP if tools is already downloaded.
-		if err := update.Download(toolsVersion); err != nil {
-			return trace.Wrap(err)
-		}
+	// If user is not logged in.
+	if profile == nil {
+		fmt.Printf("--> [LOGIN]: Update binary here.\n")
+		toolsVersion, reexec := update.Check()
+		if reexec {
+			// Download the version of client tools required by the cluster.
+			// Download may be a NOP if tools is already downloaded.
+			if err := update.Download(toolsVersion); err != nil {
+				return trace.Wrap(err)
+			}
 
-		// Re-execute client tools with the correct version of client tools.
-		code, err := update.Exec()
-		if err != nil {
-			return trace.Wrap(err)
+			// Re-execute client tools with the correct version of client tools.
+			fmt.Printf("--> [LOGIN]: Re-exec %v.\n", toolsVersion)
+			code, err := update.Exec()
+			if err != nil {
+				return trace.Wrap(err)
+			}
+			os.Exit(code)
 		}
-		os.Exit(code)
 	}
 
 	//toolsVersion, reexec := update.check()
@@ -1908,6 +1914,8 @@ func onLogin(cf *CLIConf) error {
 		// current status
 		case cf.Proxy == "" && cf.SiteName == "" && cf.DesiredRoles == "" && cf.RequestID == "" && cf.IdentityFileOut == "" ||
 			host(cf.Proxy) == host(profile.ProxyURL.Host) && cf.SiteName == profile.Cluster && cf.DesiredRoles == "" && cf.RequestID == "":
+
+			fmt.Printf("--> TODO(russjones): Fetch updated binary here.\n")
 			_, err := tc.PingAndShowMOTD(cf.Context)
 			if err != nil {
 				return trace.Wrap(err)
@@ -1921,6 +1929,8 @@ func onLogin(cf *CLIConf) error {
 		// if the proxy names match but nothing else is specified; show motd and update active profile and kube configs
 		case host(cf.Proxy) == host(profile.ProxyURL.Host) &&
 			cf.SiteName == "" && cf.DesiredRoles == "" && cf.RequestID == "" && cf.IdentityFileOut == "":
+
+			fmt.Printf("--> TODO(russjones): Fetch updated binary here.\n")
 			_, err := tc.PingAndShowMOTD(cf.Context)
 			if err != nil {
 				return trace.Wrap(err)
@@ -1946,6 +1956,8 @@ func onLogin(cf *CLIConf) error {
 		// but cluster is specified, treat this as selecting a new cluster
 		// for the same proxy
 		case (cf.Proxy == "" || host(cf.Proxy) == host(profile.ProxyURL.Host)) && cf.SiteName != "":
+
+			fmt.Printf("--> TODO(russjones): Do not update binary here, just updating selected cluster.\n")
 			_, err := tc.PingAndShowMOTD(cf.Context)
 			if err != nil {
 				return trace.Wrap(err)
@@ -1971,6 +1983,8 @@ func onLogin(cf *CLIConf) error {
 		// but desired roles or request ID is specified, treat this as a
 		// privilege escalation request for the same login session.
 		case (cf.Proxy == "" || host(cf.Proxy) == host(profile.ProxyURL.Host)) && (cf.DesiredRoles != "" || cf.RequestID != "") && cf.IdentityFileOut == "":
+
+			fmt.Printf("--> TODO(russjones): Do not update binary here, just updating selected cluster.\n")
 			_, err := tc.PingAndShowMOTD(cf.Context)
 			if err != nil {
 				return trace.Wrap(err)
@@ -2276,7 +2290,7 @@ func onListNodes(cf *CLIConf) error {
 
 	// Get list of all nodes in backend and sort by "Node Name".
 	var nodes []types.Server
-	err = client.RetryWithRelogin(cf.Context, tc, func() error {
+	err = retryWithRelogin(cf.Context, tc, func() error {
 		nodes, err = tc.ListNodesWithFilters(cf.Context)
 		return err
 	})
@@ -3098,7 +3112,7 @@ func onListClusters(cf *CLIConf) error {
 
 	var rootClusterName string
 	var leafClusters []types.RemoteCluster
-	err = client.RetryWithRelogin(cf.Context, tc, func() error {
+	err = retryWithRelogin(cf.Context, tc, func() error {
 		clusterClient, err := tc.ConnectToCluster(cf.Context)
 		if err != nil {
 			return err
@@ -3568,7 +3582,7 @@ func onSSH(cf *CLIConf) error {
 
 	tc.Stdin = os.Stdin
 	err = retryWithAccessRequest(cf, tc, func() error {
-		err = client.RetryWithRelogin(cf.Context, tc, func() error {
+		err = retryWithRelogin(cf.Context, tc, func() error {
 			return tc.SSH(cf.Context, cf.RemoteCommand, cf.LocalExec)
 		})
 		if err != nil {
@@ -3678,7 +3692,7 @@ func onJoin(cf *CLIConf) error {
 	if err != nil {
 		return trace.BadParameter("'%v' is not a valid session ID (must be GUID)", cf.SessionID)
 	}
-	err = client.RetryWithRelogin(cf.Context, tc, func() error {
+	err = retryWithRelogin(cf.Context, tc, func() error {
 		return tc.Join(cf.Context, types.SessionParticipantMode(cf.JoinMode), cf.Namespace, *sid, nil)
 	})
 	if err != nil {
@@ -3705,7 +3719,7 @@ func onSCP(cf *CLIConf) error {
 		Recursive:     cf.RecursiveCopy,
 		PreserveAttrs: cf.PreserveAttrs,
 	}
-	err = client.RetryWithRelogin(cf.Context, tc, func() error {
+	err = retryWithRelogin(cf.Context, tc, func() error {
 		return tc.SFTP(cf.Context, cf.CopySpec, int(cf.NodePort), opts, cf.Quiet)
 	})
 	// don't print context canceled errors to the user
@@ -4880,7 +4894,7 @@ func onApps(cf *CLIConf) error {
 
 	// Get a list of all applications.
 	var apps []types.Application
-	err = client.RetryWithRelogin(cf.Context, tc, func() error {
+	err = retryWithRelogin(cf.Context, tc, func() error {
 		apps, err = tc.ListApps(cf.Context, nil /* custom filter */)
 		return err
 	})
@@ -5022,7 +5036,7 @@ func onRecordings(cf *CLIConf) error {
 	}
 
 	var sessions []apievents.AuditEvent
-	if err := client.RetryWithRelogin(cf.Context, tc, func() error {
+	if err := retryWithRelogin(cf.Context, tc, func() error {
 		sessions, err = tc.SearchSessionEvents(cf.Context,
 			fromUTC, toUTC, apidefaults.DefaultChunkSize,
 			types.EventOrderDescending, cf.maxRecordingsToShow)
@@ -5238,7 +5252,7 @@ func onHeadlessApprove(cf *CLIConf) error {
 	}
 
 	tc.Stdin = os.Stdin
-	err = client.RetryWithRelogin(cf.Context, tc, func() error {
+	err = retryWithRelogin(cf.Context, tc, func() error {
 		return tc.HeadlessApprove(cf.Context, cf.HeadlessAuthenticationID, !cf.headlessSkipConfirm)
 	})
 	return trace.Wrap(err)
@@ -5288,6 +5302,15 @@ const (
 		"environments on shared systems where a memory swap attack is possible.\n" +
 		"https://goteleport.com/docs/access-controls/guides/headless/#troubleshooting"
 )
+
+func retryWithRelogin(ctx context.Context, tc *client.TeleportClient, fn func() error, opts ...client.RetryWithReloginOption) error {
+	fmt.Printf("--> TODO(russjones): retryWithRelogin: update binary here.\n")
+	// TODO(russjones): Do we even want to hook here? It is not an explicit login.
+	if err := client.RetryWithRelogin(ctx, tc, fn, opts...); err != nil {
+		return trace.Wrap(err)
+	}
+	return nil
+}
 
 // Lock the process memory to prevent rsa keys and certificates in memory from being exposed in a swap.
 func tryLockMemory(cf *CLIConf) error {

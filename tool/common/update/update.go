@@ -83,6 +83,11 @@ func Check() (string, bool) {
 		toolsVersion = matches[1]
 	}
 
+	// TODO(russjones); if the requested version matches what's downloaded, don't
+	// download again.
+	// repro: run the following command twice.
+	//
+	// TELEPORT_TOOLS_VERSION=15.1.0 ./tsh.sh --proxy=localhost --user=rjones --insecure login
 	if toolsVersion == teleport.Version {
 		return "", false
 	}
