@@ -1,4 +1,6 @@
 1. Check migration path. Someone already logged in to Teleport, suddenly upgrads, then what happens?
+2. teleport edition
+3. download and exec flock
 
 different login flows
 check inline-logins
