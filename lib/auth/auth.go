@@ -1302,7 +1302,7 @@ func (a *Server) runPeriodicOperations() {
 	defer dynamicLabelsCheck.Stop()
 
 	notificationsCleanup := interval.New(interval.Config{
-		Duration:      30 * 24 * time.Hour, // every 30 days
+		Duration:      2 * 24 * time.Hour, // every 2 days
 		FirstDuration: utils.HalfJitter(time.Second * 10),
 		Jitter:        retryutils.NewSeventhJitter(),
 	}).Next()
