@@ -72,6 +72,7 @@ import (
 	"github.com/gravitational/teleport/api/gen/proto/go/assist/v1"
 	devicepb "github.com/gravitational/teleport/api/gen/proto/go/teleport/devicetrust/v1"
 	mfav1 "github.com/gravitational/teleport/api/gen/proto/go/teleport/mfa/v1"
+	notificationsv1 "github.com/gravitational/teleport/api/gen/proto/go/teleport/notifications/v1"
 	"github.com/gravitational/teleport/api/internalutils/stream"
 	"github.com/gravitational/teleport/api/metadata"
 	"github.com/gravitational/teleport/api/types"
@@ -1300,6 +1301,12 @@ func (a *Server) runPeriodicOperations() {
 	})
 	defer dynamicLabelsCheck.Stop()
 
+	notificationsCleanup := interval.New(interval.Config{
+		Duration:      30 * 24 * time.Hour, // every 30 days
+		FirstDuration: utils.HalfJitter(time.Second * 10),
+		Jitter:        retryutils.NewSeventhJitter(),
+	}).Next()
+
 	// isolate the schedule of potentially long-running refreshRemoteClusters() from other tasks
 	go func() {
 		// reasonably small interval to ensure that users observe clusters as online within 1 minute of adding them.
@@ -1364,6 +1371,8 @@ func (a *Server) runPeriodicOperations() {
 			a.syncDesktopsLimitAlert(ctx)
 		case <-dynamicLabelsCheck.Next():
 			a.syncDynamicLabelsAlert(ctx)
+		case <-notificationsCleanup:
+			a.cleanupNotifications(ctx)
 		}
 	}
 }
@@ -5427,6 +5436,79 @@ func (a *Server) syncDynamicLabelsAlert(ctx context.Context) {
 	}
 	if err := a.UpsertClusterAlert(ctx, alert); err != nil {
 		log.Warnf("Failed to set %s alert: %v", dynamicLabelAlertID, err)
+	}
+}
+
+func (a *Server) cleanupNotifications(ctx context.Context) {
+	userNotifications, _, err := a.Cache.ListUserNotifications(ctx, 0, "")
+	if err != nil {
+		slog.WarnContext(ctx, "failed to list first set of notifications for periodic cleanup", err)
+	}
+	globalNotifications, _, err := a.Cache.ListGlobalNotifications(ctx, 0, "")
+	if err != nil {
+		slog.WarnContext(ctx, "failed to list second set of notifications for periodic cleanup", err)
+	}
+
+	timeNow := time.Now()
+
+	// Convert into a map where the key is the notification id.
+	globalNotificationsIdMap := make(map[string]*notificationsv1.GlobalNotification)
+	for _, gn := range globalNotifications {
+		globalNotificationsIdMap[gn.GetMetadata().GetName()] = gn
+	}
+
+	// Delete expired global notifications.
+	for notificationId, gn := range globalNotificationsIdMap {
+		expiry := gn.GetSpec().GetNotification().GetMetadata().GetExpires()
+
+		if timeNow.After(expiry.AsTime()) {
+			if err := a.DeleteGlobalNotification(ctx, notificationId); err != nil {
+				slog.WarnContext(ctx, "encountered error attempting to cleanup notification", err)
+			}
+			// Also remove it from the map so that we can pass it to the notification states cleanup
+			// without needing to list notifications again.
+			delete(globalNotificationsIdMap, notificationId)
+		}
+	}
+
+	// Convert into a map where the key is the notification id.
+	userNotificationsIdMap := make(map[string]*notificationsv1.Notification)
+	for _, un := range userNotifications {
+		userNotificationsIdMap[un.GetMetadata().GetName()] = un
+	}
+
+	// Delete expired user notifications.
+	for notificationId, gn := range userNotificationsIdMap {
+		expiry := gn.GetMetadata().GetExpires()
+		user := gn.GetSpec().GetUsername()
+
+		if timeNow.After(expiry.AsTime()) {
+			if err := a.DeleteUserNotification(ctx, user, notificationId); err != nil {
+				slog.WarnContext(ctx, "encountered error attempting to cleanup notification", err)
+			}
+			// Also remove it from the map so that the notification states cleanup can use it an updated source of truth
+			// without needing to list notifications again.
+			delete(userNotificationsIdMap, notificationId)
+		}
+	}
+
+	// Delete notification states for notifications which don't exist.
+	userNotificationStates, _, err := a.ListNotificationStatesForAllUsers(ctx, 0, "")
+	if err != nil {
+		slog.WarnContext(ctx, "encountered error attempting to list notification states for cleanup", err)
+	}
+
+	for _, uns := range userNotificationStates {
+		id := uns.GetSpec().GetNotificationId()
+		username := uns.GetSpec().GetUsername()
+
+		// If this notification state is for a notification which doesn't exist in either the global notifications map or
+		// the user notifications map, then delete it.
+		if globalNotificationsIdMap[id] == nil && userNotificationsIdMap[id] == nil {
+			if err := a.DeleteUserNotificationState(ctx, username, id); err != nil {
+				slog.WarnContext(ctx, "encountered error attempting to cleanup notification state", err)
+			}
+		}
 	}
 }
 
