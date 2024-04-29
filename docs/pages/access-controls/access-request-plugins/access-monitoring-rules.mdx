@@ -1,0 +1,63 @@
+---
+title: Routing Access Requests to Access Plugins
+description: How to set up Teleport's Access Monitoring Rules
+---
+
+With Teleport's Access Monitoring Rules access request notifications
+can be routed to plugins based on based on several conditions.
+
+Currently only the Slack access plugin is supported.
+
+## Prerequisites
+
+- A Teleport Enterprise Cloud account.
+
+- The Enterprise `tctl` admin tool and `tsh` client tool version >= (=teleport.version=). 
+  
+  You can verify the tools you have installed by running the following commands:
+
+  ```code
+  $ tctl version
+  # Teleport Enterprise v(=teleport.version=) go(=teleport.golang=)
+  
+  $ tsh version
+  # Teleport v(=teleport.version=) go(=teleport.golang=)
+  ```
+
+  You can download these tools by following the appropriate [Installation 
+  instructions](../../installation.mdx#linux) for your environment and Teleport edition.
+
+- At least of the Teleport Access Plugins that support using being set up.
+
+- (!docs/pages/includes/tctl.mdx!)
+
+## Step 1/??. Creating an Access Monitoring Rule.
+
+```
+kind: access_monitoring_rule
+version: v1
+metadata:
+  name: your-plugin-name
+spec:
+  subjects: ['access_request']
+  condition: 'access_request.spec.roles.contains("your_role_name")'
+  notification:
+    name: 'slack'
+    recipients: ['your_slack_channel']
+```
+
+Above is an example of an Access Monitoring Rule that routes incoming access requests
+that are requesting the role "your_role_name"to the slack channel "your_slack_channel".
+
+Multiple recipients can be specified in an Access Monitoring Rule.
+The condition field of the is set to a predicate expression defining the conditions
+under which you wish the rule to apply.
+
+Fields of the access request that are currently supported are
+- access_request.spec.roles: The set of roles requested.
+- access_request.spec.suggested_reviewers: The set of reviewers specified in the request.
+- access_request.spec.system_annotations: A map of system annotations on the request.
+- access_request.spec.user: The requesting user.
+- access_request.spec.request_reason: The request reason.
+- access_request.spec.creation_time: The creation time of the request.
+- access_request.spec.expiry: The expiry time of the request.
