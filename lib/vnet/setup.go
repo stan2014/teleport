@@ -18,9 +18,13 @@ package vnet
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
+	"github.com/gravitational/teleport/api/profile"
+	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/trace"
 	"golang.org/x/sync/errgroup"
 	"golang.zx2c4.com/wireguard/tun"
@@ -35,9 +39,13 @@ func Run(ctx context.Context, tcpHandlerResolver TCPHandlerResolver) error {
 
 	dnsIPv6 := ipv6WithSuffix(ipv6Prefix, []byte{2})
 
-	tun, err := CreateAndSetupTUNDevice(ctx, ipv6Prefix.String())
-	if err != nil {
+	tunCh, errCh := CreateAndSetupTUNDevice(ctx, ipv6Prefix.String(), dnsIPv6.String())
+
+	var tun TUNDevice
+	select {
+	case err := <-errCh:
 		return trace.Wrap(err)
+	case tun = <-tunCh:
 	}
 
 	manager, err := NewManager(&Config{
@@ -53,66 +61,148 @@ func Run(ctx context.Context, tcpHandlerResolver TCPHandlerResolver) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return trace.Wrap(manager.Run(ctx)) })
 	g.Go(func() error {
-		<-ctx.Done()
+		var adminCommandErr error
+		select {
+		case adminCommandErr = <-errCh:
+		case <-ctx.Done():
+			adminCommandErr = <-errCh
+		}
 		tunErr := tun.Close()
 		destroyErr := manager.Destroy()
-		return trace.NewAggregate(tunErr, destroyErr)
+		return trace.NewAggregate(adminCommandErr, tunErr, destroyErr)
 	})
 	return trace.Wrap(g.Wait())
 }
 
-// AdminSubcommand is the tsh subcommand that should run as root that will
-// create and setup a TUN device and pass the file descriptor for that device
-// over the unix socket found at socketPath.
-func AdminSubcommand(ctx context.Context, socketPath, ipv6Prefix string) error {
-	tun, tunName, err := createAndSetupTUNDeviceAsRoot(ctx, ipv6Prefix)
-	if err != nil {
+// AdminSubcommand is the tsh subcommand that should run as root that will create and setup a TUN device and
+// pass the file descriptor for that device over the unix socket found at socketPath.
+//
+// It also handles host OS configuration that must run as root, and stays alive to keep the host configuration
+// up to date. It will stay running until the socket at [socketPath] is deleting or encountering an
+// unrecoverable error.
+func AdminSubcommand(ctx context.Context, socketPath, ipv6Prefix, dnsAddr string) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	tunCh, errCh := createAndSetupTUNDeviceAsRoot(ctx, ipv6Prefix, dnsAddr)
+	var tun tun.Device
+	select {
+	case tun = <-tunCh:
+	case err := <-errCh:
 		return trace.Wrap(err, "performing admin setup")
 	}
-	if err := sendTUNNameAndFd(socketPath, tunName, tun.File().Fd()); err != nil {
-		return trace.Wrap(err)
+	tunName, err := tun.Name()
+	if err != nil {
+		return trace.Wrap(err, "getting TUN name")
 	}
-	return nil
+	if err := sendTUNNameAndFd(socketPath, tunName, tun.File().Fd()); err != nil {
+		return trace.Wrap(err, "sending TUN over socket")
+	}
+
+	// Stay alive until we get an error on errCh, indicating that the osConfig loop exited.
+	// If the socket is deleted, indicating that the parent process exited, cancel the context and then wait
+	// for an err or errCh.
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if _, err := os.Stat(socketPath); err != nil {
+				slog.DebugContext(ctx, "failed to stat socket path, assuming parent exited")
+				cancel()
+				return trace.Wrap(<-errCh)
+			}
+		case err = <-errCh:
+			return trace.Wrap(err)
+		}
+	}
 }
 
-// CreateAndSetupTUNDevice returns a virtual network device and configures the host OS to use that device for
+// CreateAndSetupTUNDevice creates a virtual network device and configures the host OS to use that device for
 // VNet connections.
-func CreateAndSetupTUNDevice(ctx context.Context, ipv6Prefix string) (tun.Device, error) {
-	var (
-		device tun.Device
-		name   string
-		err    error
-	)
+//
+// If not already running as root, it will spawn a root process to handle the TUN creation and host
+// configuration.
+//
+// After the TUN device is created, it will be sent on the result channel. Any error will be sent on the err
+// channel. Always select on both the result channel and the err channel when waiting for a result.
+//
+// This will keep running until [ctx] is cancelled or an unrecoverable error is encountered, in order to keep
+// the host OS configuration up to date.
+func CreateAndSetupTUNDevice(ctx context.Context, ipv6Prefix, dnsAddr string) (<-chan tun.Device, <-chan error) {
 	if os.Getuid() == 0 {
 		// We can get here if the user runs `tsh vnet` as root, but it is not in the expected path when
 		// started as a regular user, AdminSubcommand directly calls createAndSetupTUNDeviceAsRoot.
-		device, name, err = createAndSetupTUNDeviceAsRoot(ctx, ipv6Prefix)
+		return createAndSetupTUNDeviceAsRoot(ctx, ipv6Prefix, dnsAddr)
 	} else {
-		device, name, err = createAndSetupTUNDeviceWithoutRoot(ctx, ipv6Prefix)
+		return createAndSetupTUNDeviceWithoutRoot(ctx, ipv6Prefix, dnsAddr)
 	}
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	slog.InfoContext(ctx, "Created TUN device.", "device", name)
-	return device, nil
 }
 
-func createAndSetupTUNDeviceAsRoot(ctx context.Context, ipv6Prefix string) (tun.Device, string, error) {
+// createAndSetupTUNDeviceAsRoot creates a virtual network device and configures the host OS to use that device for
+// VNet connections.
+//
+// After the TUN device is created, it will be sent on the result channel. Any error will be sent on the err
+// channel. Always select on both the result channel and the err channel when waiting for a result.
+//
+// This will keep running until [ctx] is cancelled or an unrecoverable error is encountered, in order to keep
+// the host OS configuration up to date.
+func createAndSetupTUNDeviceAsRoot(ctx context.Context, ipv6Prefix, dnsAddr string) (<-chan tun.Device, <-chan error) {
+	tunCh := make(chan tun.Device, 1)
+	errCh := make(chan error, 1)
+
 	tun, tunName, err := createTUNDevice(ctx)
 	if err != nil {
-		return nil, "", trace.Wrap(err)
+		errCh <- trace.Wrap(err, "creating TUN device")
+		return tunCh, errCh
 	}
+	tunCh <- tun
 
-	tunIPv6 := ipv6Prefix + "1"
-	cfg := osConfig{
-		tunName: tunName,
-		tunIPv6: tunIPv6,
-	}
-	if err := configureOS(ctx, &cfg); err != nil {
-		return nil, "", trace.Wrap(err, "configuring OS")
-	}
+	go func() {
+		var err error
+		tunIPv6 := ipv6Prefix + "1"
+		cfg := osConfig{
+			tunName: tunName,
+			tunIPv6: tunIPv6,
+			dnsAddr: dnsAddr,
+		}
+		if cfg.dnsZones, err = dnsZones(); err != nil {
+			errCh <- trace.Wrap(err, "getting DNS zones")
+			return
+		}
+		if err := configureOS(ctx, &cfg); err != nil {
+			errCh <- trace.Wrap(err, "configuring OS")
+			return
+		}
 
-	return tun, tunName, nil
+		// Re-check the DNS zones every 10 seconds, and configure the host OS appropriately.
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+	loop:
+		for {
+			fmt.Println("loop")
+			select {
+			case <-ticker.C:
+				fmt.Println("getting dns zones")
+				if cfg.dnsZones, err = dnsZones(); err != nil {
+					errCh <- trace.Wrap(err, "getting DNS zones")
+					return
+				}
+				fmt.Println("configuring os")
+				if err := configureOS(ctx, &cfg); err != nil {
+					errCh <- trace.Wrap(err, "configuring OS")
+					return
+				}
+			case <-ctx.Done():
+				fmt.Println("context done")
+				break loop
+			}
+		}
+
+		// Shutting down, deconfigure OS.
+		errCh <- trace.Wrap(configureOS(ctx, &osConfig{}))
+	}()
+	return tunCh, errCh
 }
 
 func createTUNDevice(ctx context.Context) (tun.Device, string, error) {
@@ -129,6 +219,20 @@ func createTUNDevice(ctx context.Context) (tun.Device, string, error) {
 }
 
 type osConfig struct {
-	tunName string
-	tunIPv6 string
+	tunName  string
+	tunIPv6  string
+	dnsAddr  string
+	dnsZones []string
+}
+
+func dnsZones() ([]string, error) {
+	profileDir := profile.FullProfilePath(os.Getenv(types.HomeEnvVar))
+	profileNames, err := profile.ListProfileNames(profileDir)
+	if err != nil {
+		return nil, trace.Wrap(err, "listing profiles")
+	}
+	// profile names are Teleport proxy addresses.
+	// TODO(nklaassen): support leaf clusters and custom DNS zones.
+	// TODO(nklaassen): check if profiles are expired.
+	return profileNames, nil
 }

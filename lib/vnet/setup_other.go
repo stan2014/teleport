@@ -32,8 +32,10 @@ var (
 	VnetNotImplemented = &trace.NotImplementedError{Message: "VNet is not implemented on " + runtime.GOOS}
 )
 
-func createAndSetupTUNDeviceWithoutRoot(ctx context.Context, ipv6Prefix string) (tun.Device, string, error) {
-	return nil, "", trace.Wrap(VnetNotImplemented)
+func createAndSetupTUNDeviceWithoutRoot(ctx context.Context, ipv6Prefix, dnsAddr string) (<-chan tun.Device, <-chan error) {
+	errCh := make(chan error, 1)
+	errCh <- trace.Wrap(VnetNotImplemented)
+	return nil, errCh
 }
 
 func sendTUNNameAndFd(socketPath, tunName string, fd uintptr) error {
