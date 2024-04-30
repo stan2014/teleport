@@ -36,7 +36,7 @@ func configureOS(ctx context.Context, cfg *osConfig) error {
 	// There is no need to remove IPs or the IPv6 route, they will automatically be cleaned up when the
 	// process exits and the TUN is deleted.
 	if cfg.tunIPv6 != "" {
-		slog.With("device", cfg.tunName, "address", cfg.tunIPv6).InfoContext(ctx, "Setting IPv6 address for the TUN device.")
+		slog.InfoContext(ctx, "Setting IPv6 address for the TUN device.", "device", cfg.tunName, "address", cfg.tunIPv6)
 		cmd := exec.CommandContext(ctx, "ifconfig", cfg.tunName, "inet6", cfg.tunIPv6, "prefixlen", "64")
 		if err := cmd.Run(); err != nil {
 			return trace.Wrap(err, "running %v", cmd.Args)
@@ -65,7 +65,7 @@ func configureDNS(ctx context.Context, nameserver string, zones []string) error 
 		return trace.BadParameter("empty nameserver with non-empty zones")
 	}
 
-	slog.With("nameserver", nameserver, "zones", zones).Debug("Configuring DNS.")
+	slog.Debug("Configuring DNS.", "nameserver", nameserver, "zones", zones)
 	if err := os.MkdirAll(resolverPath, os.FileMode(0755)); err != nil {
 		return trace.Wrap(err, "creating %s", resolverPath)
 	}
