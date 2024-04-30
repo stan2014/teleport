@@ -217,6 +217,42 @@ func (l *LocalProxy) start(ctx context.Context) error {
 	}
 }
 
+// HandleTCPConnector injects an inbound TCP connection (via [connector]) that doesn't come in through any
+// net.Listener. It is used by VNet to share the common local proxy code. [connector] should be called as late
+// as possible so that in case of error VNet clients get a failed TCP dial (with RST) rather than a succesful
+// dial with an immediately closed connection.
+func (l *LocalProxy) HandleTCPConnector(ctx context.Context, connector func() (net.Conn, error)) error {
+	certs, err := l.getCertsWithoutConn()
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	tlsConn, err := client.DialALPN(ctx, l.cfg.RemoteProxyAddr, l.getALPNDialerConfig(certs))
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	defer tlsConn.Close()
+
+	var upstreamConn net.Conn = tlsConn
+	if common.IsPingProtocol(common.Protocol(tlsConn.ConnectionState().NegotiatedProtocol)) {
+		l.cfg.Log.Debug("Using ping connection")
+		upstreamConn = pingconn.NewTLS(tlsConn)
+	}
+
+	downstreamConn, err := connector()
+	if err != nil {
+		return trace.Wrap(err, "getting downstream conn")
+	}
+	defer downstreamConn.Close()
+
+	if l.cfg.Middleware != nil {
+		if err := l.cfg.Middleware.OnNewConnection(ctx, l, downstreamConn); err != nil {
+			return trace.Wrap(err, "middleware failed to handle client connection")
+		}
+	}
+
+	return trace.Wrap(utils.ProxyConn(ctx, downstreamConn, upstreamConn))
+}
+
 // GetAddr returns the LocalProxy listener address.
 func (l *LocalProxy) GetAddr() string {
 	return l.cfg.Listener.Addr().String()
@@ -472,6 +508,13 @@ func (l *LocalProxy) getCertsForConn(ctx context.Context, downstreamConn net.Con
 		return certs, conn, nil
 	}
 	return nil, downstreamConn, nil
+}
+
+func (l *LocalProxy) getCertsWithoutConn() ([]tls.Certificate, error) {
+	if l.cfg.CheckCertsNeeded {
+		return nil, trace.BadParameter("getCertsWithoutConn called while CheckCertsNeeded is true: this is a bug")
+	}
+	return l.getCerts(), nil
 }
 
 func (l *LocalProxy) isPostgresProxy() bool {

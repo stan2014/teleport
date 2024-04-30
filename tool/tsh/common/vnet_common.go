@@ -18,6 +18,8 @@ package common
 
 import (
 	"context"
+	"crypto/tls"
+	"log/slog"
 	"net"
 	"strings"
 
@@ -26,7 +28,9 @@ import (
 
 	"github.com/gravitational/teleport/api/client/proto"
 	"github.com/gravitational/teleport/api/types"
+	"github.com/gravitational/teleport/lib/auth"
 	"github.com/gravitational/teleport/lib/client"
+	"github.com/gravitational/teleport/lib/srv/alpnproxy"
 	"github.com/gravitational/teleport/lib/vnet"
 )
 
@@ -76,9 +80,11 @@ func (r *tcpAppResolver) ResolveTCPHandler(ctx context.Context, fqdn string) (ha
 		for _, appServer := range appServers {
 			app := appServer.GetApp()
 			if app.GetPublicAddr() == appPublicAddr && app.IsTCP() {
-				return &tcpAppHandler{
-					app: app,
-				}, true, nil
+				appHandler, err := newTCPAppHandler(ctx, r, profileName, app)
+				if err != nil {
+					return nil, false, trace.Wrap(err)
+				}
+				return appHandler, true, nil
 			}
 		}
 	}
@@ -93,12 +99,95 @@ func (r *tcpAppResolver) getTeleportClient(ctx context.Context, profileName stri
 }
 
 type tcpAppHandler struct {
+	lp  *alpnproxy.LocalProxy
 	app types.Application
 }
 
-// HandleTCPConnector handles a TCP connection from VNet and proxies it to the application.
+func newTCPAppHandler(ctx context.Context, r *tcpAppResolver, profileName string, app types.Application) (*tcpAppHandler, error) {
+	tc, err := r.getTeleportClient(ctx, profileName)
+	if err != nil {
+		return nil, trace.Wrap(err, "getting Teleport client")
+	}
+
+	slog.With("app", app, "app_name", app.GetName()).DebugContext(ctx, "logging in to app")
+	appCerts, err := getAppCert(ctx, tc, app)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	// TODO(nklaassen/ravicious): add middleware to refresh expired app certs and handle per-session MFA.
+	lp, err := alpnproxy.NewLocalProxy(
+		makeBasicLocalProxyConfig(r.cf, tc, nil /*listener*/),
+		alpnproxy.WithALPNProtocol(alpnProtocolForApp(app)),
+		alpnproxy.WithClientCerts(appCerts),
+		alpnproxy.WithClusterCAsIfConnUpgrade(ctx, tc.RootClusterCACertPool),
+	)
+	if err != nil {
+		return nil, trace.Wrap(err, "creating local proxy")
+	}
+
+	return &tcpAppHandler{
+		lp:  lp,
+		app: app,
+	}, nil
+}
+
+// HandleTCP handles a TCP connection from VNet and proxies it to the application.
 func (h *tcpAppHandler) HandleTCPConnector(ctx context.Context, connector func() (net.Conn, error)) error {
-	return trace.NotImplemented("HandleTCP is not implemented for TCP app handler")
+	return trace.Wrap(h.lp.HandleTCPConnector(ctx, connector), "handling TCP connector")
+}
+
+func getAppCert(ctx context.Context, tc *client.TeleportClient, app types.Application) (tls.Certificate, error) {
+	cert, needLogin, err := loadAppCertificate(tc, app.GetName())
+	if err == nil && needLogin == false {
+		return cert, nil
+	}
+	if !needLogin {
+		return tls.Certificate{}, trace.Wrap(err, "loading app certificate")
+	}
+
+	profile, err := tc.ProfileStatus()
+	if err != nil {
+		return tls.Certificate{}, trace.Wrap(err, "loading profile")
+	}
+
+	routeToApp := proto.RouteToApp{
+		Name:        app.GetName(),
+		PublicAddr:  app.GetPublicAddr(),
+		ClusterName: tc.SiteName,
+	}
+
+	// TODO (Joerger): DELETE IN v17.0.0
+	clusterClient, err := tc.ConnectToCluster(ctx)
+	if err != nil {
+		return tls.Certificate{}, trace.Wrap(err)
+	}
+	rootClient, err := clusterClient.ConnectToRootCluster(ctx)
+	if err != nil {
+		return tls.Certificate{}, trace.Wrap(err)
+	}
+	routeToApp.SessionID, err = auth.TryCreateAppSessionForClientCertV15(ctx, rootClient, tc.Username, routeToApp)
+	if err != nil {
+		return tls.Certificate{}, trace.Wrap(err)
+	}
+
+	err = tc.ReissueUserCerts(ctx, client.CertCacheKeep, client.ReissueParams{
+		RouteToCluster: profile.Cluster,
+		RouteToApp:     routeToApp,
+		AccessRequests: profile.ActiveRequests.AccessRequests,
+	})
+	if err != nil {
+		return tls.Certificate{}, trace.Wrap(err, "logging in to app")
+	}
+
+	cert, needLogin, err = loadAppCertificate(tc, app.GetName())
+	if err != nil {
+		return tls.Certificate{}, trace.Wrap(err, "loading app certificate after login")
+	}
+	if needLogin {
+		return tls.Certificate{}, trace.Errorf("still need login after login: this is a bug")
+	}
+	return cert, nil
 }
 
 func isSubdomain(appFQDN, proxyAddress string) bool {
