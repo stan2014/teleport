@@ -23,11 +23,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/gravitational/teleport/api/profile"
-	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/trace"
 	"golang.org/x/sync/errgroup"
 	"golang.zx2c4.com/wireguard/tun"
+
+	"github.com/gravitational/teleport/api/profile"
+	"github.com/gravitational/teleport/api/types"
 )
 
 // Run is a blocking call to create and start Teleport VNet.
@@ -127,7 +128,7 @@ func AdminSubcommand(ctx context.Context, socketPath, ipv6Prefix, dnsAddr string
 // After the TUN device is created, it will be sent on the result channel. Any error will be sent on the err
 // channel. Always select on both the result channel and the err channel when waiting for a result.
 //
-// This will keep running until [ctx] is cancelled or an unrecoverable error is encountered, in order to keep
+// This will keep running until [ctx] is canceled or an unrecoverable error is encountered, in order to keep
 // the host OS configuration up to date.
 func CreateAndSetupTUNDevice(ctx context.Context, ipv6Prefix, dnsAddr string) (<-chan tun.Device, <-chan error) {
 	if os.Getuid() == 0 {
@@ -145,7 +146,7 @@ func CreateAndSetupTUNDevice(ctx context.Context, ipv6Prefix, dnsAddr string) (<
 // After the TUN device is created, it will be sent on the result channel. Any error will be sent on the err
 // channel. Always select on both the result channel and the err channel when waiting for a result.
 //
-// This will keep running until [ctx] is cancelled or an unrecoverable error is encountered, in order to keep
+// This will keep running until [ctx] is canceled or an unrecoverable error is encountered, in order to keep
 // the host OS configuration up to date.
 func createAndSetupTUNDeviceAsRoot(ctx context.Context, ipv6Prefix, dnsAddr string) (<-chan tun.Device, <-chan error) {
 	tunCh := make(chan tun.Device, 1)
