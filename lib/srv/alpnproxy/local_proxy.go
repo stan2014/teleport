@@ -219,7 +219,7 @@ func (l *LocalProxy) start(ctx context.Context) error {
 
 // HandleTCPConnector injects an inbound TCP connection (via [connector]) that doesn't come in through any
 // net.Listener. It is used by VNet to share the common local proxy code. [connector] should be called as late
-// as possible so that in case of error VNet clients get a failed TCP dial (with RST) rather than a succesful
+// as possible so that in case of error VNet clients get a failed TCP dial (with RST) rather than a successful
 // dial with an immediately closed connection.
 func (l *LocalProxy) HandleTCPConnector(ctx context.Context, connector func() (net.Conn, error)) error {
 	certs, err := l.getCertsWithoutConn()
