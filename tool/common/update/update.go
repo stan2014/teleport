@@ -23,6 +23,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -32,10 +33,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/trace"
+
+	"github.com/coreos/go-semver/semver"
 )
 
 func Check() (string, bool) {
@@ -97,9 +101,23 @@ func Check() (string, bool) {
 
 // TODO(russjones): If you specify TELEPORT_TOOLS_VERSION, should that download
 // to a temp location and not overide ~/.tsh/bin?
-func Download(toolsVersion string) error {
-	// TODO(russjones): be edition aware.
-	// TODO(russjones): wipe out old version?
+func Download(toolsVersion string, toolsEdition string) error {
+	// TODO(russjones): What happens if binary is updated when checking for a
+	// lock, does this part need to be under a lock as well?
+	// TODO(russjones): Add edition check here as well.
+	// If the version of the running binary or the version downloaded to
+	// $TELEPORT_HOME/bin is the same as the requested version of client tools,
+	// nothing to be done, exit early.
+	teleportVersion, err := version()
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	if toolsVersion == teleport.Version || toolsVersion == teleportVersion {
+		return nil
+	}
+
+	unlock, err := lock()
+	defer unlock()
 
 	dir := "/Users/rjones/.tsh/bin"
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -206,6 +224,52 @@ func Exec() (int, error) {
 	return cmd.ProcessState.ExitCode(), nil
 }
 
+func version() (string, error) {
+	path, err := toolPath()
+	if err != nil {
+		return "", trace.Wrap(err)
+	}
+
+	// Set a timeout to not let "{tsh, tctl} version" block forever. Allow up
+	// to 10 seconds because sometimes MDM tools like Jamf cause a lot of
+	// latency in launching binaries.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Execue "{tsh, tctl} version" and pass in TELEPORT_TOOLS_VERSION=off to
+	// turn off all automatic updates code paths to prevent any recursion.
+	command := exec.CommandContext(ctx, path, "version")
+	command.Env = []string{teleportToolsVersion + "=off"}
+	output, err := command.Output()
+	if err != nil {
+		return "", trace.Wrap(err)
+	}
+
+	// The output for "{tsh, tctl} version" can be multiple lines. Find the
+	// actual version line and extract the version.
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if !strings.HasPrefix(line, "Teleport") {
+			continue
+		}
+
+		matches := pattern.FindStringSubmatch(line)
+		if len(matches) != 2 {
+			return "", trace.BadParameter("invalid version line: %v", line)
+		}
+		version, err := semver.NewVersion(matches[1])
+		if err != nil {
+			return "", trace.Wrap(err)
+		}
+		return version, nil
+	}
+
+	return trace.BadParameter("unable to determine version")
+}
+
+// toolPath returns the path to {tsh, tctl} in $TELEPORT_HOME/bin.
 func toolPath() (string, error) {
 	home := os.Getenv(types.HomeEnvVar)
 	if home == "" {
@@ -249,3 +313,11 @@ func toolPath() (string, error) {
 //func reexec() (int, error) {
 //	return 0, nil
 //}
+
+const (
+	teleportToolsVersion = "TELEPORT_TOOLS_VERSION"
+)
+
+var (
+	pattern = regexp.MustCompile(`(?m)Teleport v(.*) git`)
+)
