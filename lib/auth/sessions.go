@@ -580,7 +580,7 @@ func TryCreateAppSessionForClientCertV15(ctx context.Context, client CreateAppSe
 	}
 
 	// If the auth server is v16+, the client does not need to provide a pre-created app session.
-	const minServerVersion = "16.0.0-aa" // "-aa" matches all development versions
+	const minServerVersion = "16.0.0-alpha" // still needed in dev versions
 	if utils.MeetsVersion(pingResp.ServerVersion, minServerVersion) {
 		return "", nil
 	}
