@@ -47,7 +47,7 @@ import (
 // After the TUN device is created, it will be sent on the result channel. Any error will be sent on the err
 // channel. Always select on both the result channel and the err channel when waiting for a result.
 //
-// This will keep running until [ctx] is cancelled or an unrecoverable error is encountered, in order to keep
+// This will keep running until [ctx] is canceled or an unrecoverable error is encountered, in order to keep
 // the host OS configuration up to date.
 func createAndSetupTUNDeviceWithoutRoot(ctx context.Context, ipv6Prefix, dnsAddr string) (<-chan tun.Device, <-chan error) {
 	tunCh := make(chan tun.Device, 1)
@@ -72,7 +72,7 @@ func createAndSetupTUNDeviceWithoutRoot(ctx context.Context, ipv6Prefix, dnsAddr
 		return trace.Wrap(socket.Close())
 	})
 	g.Go(func() error {
-		// Admin command is expected to run until ctx is cancelled.
+		// Admin command is expected to run until ctx is canceled.
 		return trace.Wrap(execAdminSubcommand(ctx, socketPath, ipv6Prefix, dnsAddr))
 	})
 	g.Go(func() error {

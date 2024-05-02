@@ -65,7 +65,7 @@ func configureDNS(ctx context.Context, nameserver string, zones []string) error 
 		return trace.BadParameter("empty nameserver with non-empty zones")
 	}
 
-	slog.Debug("Configuring DNS.", "nameserver", nameserver, "zones", zones)
+	slog.DebugContext(ctx, "Configuring DNS.", "nameserver", nameserver, "zones", zones)
 	if err := os.MkdirAll(resolverPath, os.FileMode(0755)); err != nil {
 		return trace.Wrap(err, "creating %s", resolverPath)
 	}
