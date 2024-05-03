@@ -19,25 +19,25 @@
 package update
 
 import (
-	"archive/tar"
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gravitational/teleport"
+	"github.com/gravitational/teleport/api/constants"
 	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/trace"
+	"github.com/mailgun/log"
 
 	"github.com/coreos/go-semver/semver"
 )
@@ -99,12 +99,14 @@ func Check() (string, bool) {
 	return toolsVersion, true
 }
 
-// TODO(russjones): If you specify TELEPORT_TOOLS_VERSION, should that download
-// to a temp location and not overide ~/.tsh/bin?
-func Download(toolsVersion string, toolsEdition string) error {
-	// TODO(russjones): What happens if binary is updated when checking for a
-	// lock, does this part need to be under a lock as well?
+func Download(toolsVersion string) error {
 	// TODO(russjones): Add edition check here as well.
+	// For Linux:
+	//   * https://cdn.teleport.dev/teleport-{ent-}v15.3.0-linux-{amd64,arm64}-{fips-}bin.tar.gz
+	// For macOS:
+	//   * https://cdn.teleport.dev/teleport-{ent-}v15.3.0-darwin-{amd64,arm64}-bin.tar.gz
+	//   * https://cdn.teleport.dev/teleport-v15.3.0-darwin-arm64-bin.tar.gz
+
 	// If the version of the running binary or the version downloaded to
 	// $TELEPORT_HOME/bin is the same as the requested version of client tools,
 	// nothing to be done, exit early.
@@ -116,26 +118,23 @@ func Download(toolsVersion string, toolsEdition string) error {
 		return nil
 	}
 
-	unlock, err := lock()
-	defer unlock()
-
-	dir := "/Users/rjones/.tsh/bin"
+	// Create $TELEPORT_HOME/bin if it does not exist.
+	path, err := toolPath()
+	if err != nil {
+		return trace.Wrap(err)
+	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
-	url := fmt.Sprintf("https://cdn.teleport.dev/teleport-v%v-darwin-arm64-bin.tar.gz", toolsVersion)
-	// Create an HTTP client that follows redirects
-	client := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return nil
-		},
-	}
-
-	// TODO(russjones): print progress here.
-	resp, err := client.Get(url)
+	// Download Teleport archive (tar, pkg, or zip).
+	url, hashUrl, err := archivePath()
 	if err != nil {
-		return err
+		return trace.Wrap(err)
+	}
+	resp, err := http.Get(url)
+	if err != nil {
+		return trace.Wrap(err)
 	}
 	defer resp.Body.Close()
 
@@ -151,53 +150,108 @@ func Download(toolsVersion string, toolsEdition string) error {
 	//	return err
 	//}
 
-	//expectedHashString := strings.TrimSpace(string(expectedHash))
-	//parts := strings.Split(expectedHashString, " ")
-	//expectedHash = []byte(parts[0])
+	var err error
+	switch runtime.GOOS {
+	case constants.DarwinOS:
+		return trace.Wrap(downloadDarwin(toolsVersion))
+	case constants.WindowsOS:
+		return trace.Wrap(downloadWindows(toolsVersion))
+	// Assume a Unix-like OS, probably Linux:
+	default:
+		return trace.Wrap(downloadUnix(toolsVersion))
+	}
 
-	//// Check the hash of the file
-	//hash := sha256.New()
-	//if _, err := io.Copy(hash, resp.Body); err != nil {
+}
+
+func downloadDarwin() error {
+	// Lock to allow multiple concurrent {tsh, tctl} to run.
+	unlock, err := lock()
+	defer unlock()
+
+	//url := fmt.Sprintf("https://cdn.teleport.dev/teleport-v%v-darwin-arm64-bin.tar.gz", toolsVersion)
+	//// Create an HTTP client that follows redirects
+	//client := &http.Client{
+	//	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+	//		return nil
+	//	},
+	//}
+
+	//// TODO(russjones): print progress here.
+	//resp, err := client.Get(url)
+	//if err != nil {
 	//	return err
 	//}
-	//if fmt.Sprintf("%x", hash.Sum(nil)) != string(expectedHash) {
-	//	return fmt.Errorf("hash mismatch")
+	//defer resp.Body.Close()
+
+	//// TODO(russjones): fix this so the body can be used twice.
+	////// Get the expected hash from the hashURL
+	////expectedHashResp, err := http.Get(url + ".sha256")
+	////if err != nil {
+	////	return err
+	////}
+	////defer expectedHashResp.Body.Close()
+	////expectedHash, err := ioutil.ReadAll(expectedHashResp.Body)
+	////if err != nil {
+	////	return err
+	////}
+
+	////expectedHashString := strings.TrimSpace(string(expectedHash))
+	////parts := strings.Split(expectedHashString, " ")
+	////expectedHash = []byte(parts[0])
+
+	////// Check the hash of the file
+	////hash := sha256.New()
+	////if _, err := io.Copy(hash, resp.Body); err != nil {
+	////	return err
+	////}
+	////if fmt.Sprintf("%x", hash.Sum(nil)) != string(expectedHash) {
+	////	return fmt.Errorf("hash mismatch")
+	////}
+
+	//// Decompress the file
+	//gzipReader, err := gzip.NewReader(resp.Body)
+	//if err != nil {
+	//	return err
 	//}
+	//tarReader := tar.NewReader(gzipReader)
+	//for {
+	//	header, err := tarReader.Next()
+	//	if err == io.EOF {
+	//		break
+	//	}
+	//	// TODO(russjones): tbot?
+	//	if header.Name != "teleport/tctl" && header.Name != "teleport/tsh" {
+	//		if _, err := io.Copy(ioutil.Discard, tarReader); err != nil {
+	//			fmt.Printf("--> discard: %v\n")
+	//		}
+	//		continue
+	//	}
 
-	// Decompress the file
-	gzipReader, err := gzip.NewReader(resp.Body)
-	if err != nil {
-		return err
-	}
-	tarReader := tar.NewReader(gzipReader)
-	for {
-		header, err := tarReader.Next()
-		if err == io.EOF {
-			break
-		}
-		// TODO(russjones): tbot?
-		if header.Name != "teleport/tctl" && header.Name != "teleport/tsh" {
-			if _, err := io.Copy(ioutil.Discard, tarReader); err != nil {
-				fmt.Printf("--> discard: %v\n")
-			}
-			continue
-		}
+	//	filename := filepath.Join(dir, strings.TrimPrefix(header.Name, "teleport/"))
+	//	file, err := os.Create(filename)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	_, err = io.Copy(file, tarReader)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	if err := file.Chmod(os.FileMode(0755)); err != nil {
+	//		return err
+	//	}
+	//	fmt.Printf("--> wrote %v\n", filename)
+	//}
+	//return nil
 
-		filename := filepath.Join(dir, strings.TrimPrefix(header.Name, "teleport/"))
-		file, err := os.Create(filename)
-		if err != nil {
-			return err
-		}
-		_, err = io.Copy(file, tarReader)
-		if err != nil {
-			return err
-		}
-		if err := file.Chmod(os.FileMode(0755)); err != nil {
-			return err
-		}
-		fmt.Printf("--> wrote %v\n", filename)
-	}
-	return nil
+	return trace.BadParameter("windows not supported yet")
+}
+
+func downloadUnix() error {
+	return trace.BadParameter("unix not supported yet")
+}
+
+func downloadWindows() error {
+	return trace.BadParameter("windows not supported yet")
 }
 
 func Exec() (int, error) {
@@ -222,6 +276,37 @@ func Exec() (int, error) {
 	}
 
 	return cmd.ProcessState.ExitCode(), nil
+}
+
+func lock() (func(), error) {
+	// Build the path to the lock file that will be used by flock.
+	path, err := toolPath()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	lockFile := filepath.Join(path, ".lock")
+
+	// Create the advisory lock using flock.
+	// TODO(russjones): Use os.CreateTemp here?
+	lf, err := os.OpenFile(lockFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return func() {
+		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_UN); err != nil {
+			log.Debugf("Failed to unlock file: %v: %v.", lockFile, err)
+		}
+		if err := os.Remove(lockFile); err != nil {
+			log.Debugf("Failed to remove lock file: %v: %v.", lockFile, err)
+		}
+		if err := lf.Close(); err != nil {
+			log.Debugf("Failed to close lock file %v: %v.", lockFile, err)
+		}
+	}, nil
 }
 
 func version() (string, error) {
