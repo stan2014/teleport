@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
@@ -34,79 +35,71 @@ import (
 	"time"
 
 	"github.com/gravitational/teleport"
-	"github.com/gravitational/teleport/api/constants"
 	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/trace"
-	"github.com/mailgun/log"
 
 	"github.com/coreos/go-semver/semver"
+	log "github.com/sirupsen/logrus"
 )
 
-func Check() (string, bool) {
-	// Check if the user has requested a specific version of client tools.
-	toolsVersion := os.Getenv("TELEPORT_TOOLS_VERSION")
-	switch {
-	case toolsVersion == "off":
-		return "", false
-	case toolsVersion != "":
-		return toolsVersion, true
-	default:
-	}
-
-	// TODO(russjones): Get binary name of os package here to switch to tctl
-	// when needed.
-	path, err := toolPath()
-	if err != nil {
-		// TODO(russjones): Log the error.
-		return "", false
-	}
-
-	// TODO(russjones): Switch to CommandContext here.
-	command := exec.Command(path, "version")
-	command.Env = []string{"TELEPORT_TOOLS_VERSION=off"}
-	output, err := command.Output()
-	if err != nil {
-		// TODO(russjones): Log the error.
-		return "", false
-	}
-
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	for scanner.Scan() {
-		line := scanner.Text() // Get the current line
-		if !strings.HasPrefix(line, "Teleport") {
-			continue
-		}
-
-		var re = regexp.MustCompile(`(?m)Teleport v(.*) git`)
-		matches := re.FindStringSubmatch(line)
-		if len(matches) != 2 {
-			// TODO(russjones): Log the error.
-			return "", false
-		}
-
-		toolsVersion = matches[1]
-	}
-
-	// TODO(russjones); if the requested version matches what's downloaded, don't
-	// download again.
-	// repro: run the following command twice.
-	//
-	// TELEPORT_TOOLS_VERSION=15.1.0 ./tsh.sh --proxy=localhost --user=rjones --insecure login
-	if toolsVersion == teleport.Version {
-		return "", false
-	}
-
-	return toolsVersion, true
-}
+//func Check() (string, bool) {
+//	// Check if the user has requested a specific version of client tools.
+//	toolsVersion := os.Getenv("TELEPORT_TOOLS_VERSION")
+//	switch {
+//	case toolsVersion == "off":
+//		return "", false
+//	case toolsVersion != "":
+//		return toolsVersion, true
+//	default:
+//	}
+//
+//	// TODO(russjones): Get binary name of os package here to switch to tctl
+//	// when needed.
+//	path, err := toolPath()
+//	if err != nil {
+//		// TODO(russjones): Log the error.
+//		return "", false
+//	}
+//
+//	// TODO(russjones): Switch to CommandContext here.
+//	command := exec.Command(path, "version")
+//	command.Env = []string{"TELEPORT_TOOLS_VERSION=off"}
+//	output, err := command.Output()
+//	if err != nil {
+//		// TODO(russjones): Log the error.
+//		return "", false
+//	}
+//
+//	scanner := bufio.NewScanner(bytes.NewReader(output))
+//	for scanner.Scan() {
+//		line := scanner.Text() // Get the current line
+//		if !strings.HasPrefix(line, "Teleport") {
+//			continue
+//		}
+//
+//		var re = regexp.MustCompile(`(?m)Teleport v(.*) git`)
+//		matches := re.FindStringSubmatch(line)
+//		if len(matches) != 2 {
+//			// TODO(russjones): Log the error.
+//			return "", false
+//		}
+//
+//		toolsVersion = matches[1]
+//	}
+//
+//	// TODO(russjones); if the requested version matches what's downloaded, don't
+//	// download again.
+//	// repro: run the following command twice.
+//	//
+//	// TELEPORT_TOOLS_VERSION=15.1.0 ./tsh.sh --proxy=localhost --user=rjones --insecure login
+//	if toolsVersion == teleport.Version {
+//		return "", false
+//	}
+//
+//	return toolsVersion, true
+//}
 
 func Download(toolsVersion string) error {
-	// TODO(russjones): Add edition check here as well.
-	// For Linux:
-	//   * https://cdn.teleport.dev/teleport-{ent-}v15.3.0-linux-{amd64,arm64}-{fips-}bin.tar.gz
-	// For macOS:
-	//   * https://cdn.teleport.dev/teleport-{ent-}v15.3.0-darwin-{amd64,arm64}-bin.tar.gz
-	//   * https://cdn.teleport.dev/teleport-v15.3.0-darwin-arm64-bin.tar.gz
-
 	// If the version of the running binary or the version downloaded to
 	// $TELEPORT_HOME/bin is the same as the requested version of client tools,
 	// nothing to be done, exit early.
@@ -119,55 +112,150 @@ func Download(toolsVersion string) error {
 	}
 
 	// Create $TELEPORT_HOME/bin if it does not exist.
-	path, err := toolPath()
+	dir, err := toolsDir()
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	// Download Teleport archive (tar, pkg, or zip).
-	url, hashUrl, err := archivePath()
-	if err != nil {
 		return trace.Wrap(err)
 	}
-	resp, err := http.Get(url)
-	if err != nil {
+
+	// Download and update {tsh, tctl} in $TELEPORT_HOME/bin.
+	if err := update(toolsVersion); err != nil {
 		return trace.Wrap(err)
 	}
-	defer resp.Body.Close()
 
-	// TODO(russjones): fix this so the body can be used twice.
-	//// Get the expected hash from the hashURL
-	//expectedHashResp, err := http.Get(url + ".sha256")
+	//// Exec.
+	//err := syscall.Exec("/Users/rjones/Desktop/lock/bin/hello", []string{"/Users/rjones/Desktop/lock/bin/hello", "-print"}, os.Environ())
 	//if err != nil {
-	//	return err
-	//}
-	//defer expectedHashResp.Body.Close()
-	//expectedHash, err := ioutil.ReadAll(expectedHashResp.Body)
-	//if err != nil {
-	//	return err
+	//	return trace.Wrap(err)
 	//}
 
-	var err error
-	switch runtime.GOOS {
-	case constants.DarwinOS:
-		return trace.Wrap(downloadDarwin(toolsVersion))
-	case constants.WindowsOS:
-		return trace.Wrap(downloadWindows(toolsVersion))
-	// Assume a Unix-like OS, probably Linux:
-	default:
-		return trace.Wrap(downloadUnix(toolsVersion))
-	}
-
+	return nil
 }
 
-func downloadDarwin() error {
+// TODO(russjones): fix this so the body can be used twice.
+//// Get the expected hash from the hashURL
+//expectedHashResp, err := http.Get(url + ".sha256")
+//if err != nil {
+//	return err
+//}
+//defer expectedHashResp.Body.Close()
+//expectedHash, err := ioutil.ReadAll(expectedHashResp.Body)
+//if err != nil {
+//	return err
+//}
+
+//	var err error
+//	switch runtime.GOOS {
+//	case constants.DarwinOS:
+//		return trace.Wrap(downloadDarwin(toolsVersion))
+//	case constants.WindowsOS:
+//		return trace.Wrap(downloadWindows(toolsVersion))
+//	// Assume a Unix-like OS, probably Linux:
+//	default:
+//		return trace.Wrap(downloadUnix(toolsVersion))
+//	}
+
+// TODO(russjones): Add edition check here as well.
+// For Linux:
+//   - https://cdn.teleport.dev/teleport-{ent-}v15.3.0-linux-{amd64,arm64}-{fips-}bin.tar.gz
+//
+// For macOS:
+//   - https://cdn.teleport.dev/teleport-{ent-}v15.3.0-darwin-{amd64,arm64}-bin.tar.gz
+//   - https://cdn.teleport.dev/teleport-v15.3.0-darwin-arm64-bin.tar.gz
+func update(toolsVersion string) error {
 	// Lock to allow multiple concurrent {tsh, tctl} to run.
 	unlock, err := lock()
 	defer unlock()
 
+	archiveURL, hashURL, err := urls(toolsVersion, "")
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	log.Debugf("Archive download path: %v.", archiveURL)
+	fmt.Printf("Archive download path: %v.\n", archiveURL)
+
+	// Download the archive and validate against the hash. Download to a
+	// temporary path within $TELEPORT_HOME/bin.
+	hash, err := downloadHash(hashURL)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	fmt.Printf("Archive hash: %v.\n", hash)
+	//dir, err := downloadArchive(hash)
+	//if err != nil {
+	//	return trace.Wrap(err)
+	//}
+
+	// Update permissions.
+
+	// Perform atomic replace. This ensures that exec will not fail.
+
+	return nil
+}
+
+func downloadHash(url string) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", trace.Wrap(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", trace.BadParameter("request failed with: %v", resp.StatusCode)
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", trace.Wrap(err)
+	}
+
+	// Hash is the first 64 bytes of the response.
+	return string(body)[0:63], nil
+}
+
+// urls returns the URL for the Teleport archive to download. The format is:
+// https://cdn.teleport.dev/teleport-{, ent-}v15.3.0-{linux, darwin, windows}-{amd64,arm64,arm,386}-{fips-}bin.tar.gz
+func urls(toolsVersion string, toolsEdition string) (string, string, error) {
+	edition := ""
+	if toolsEdition == "ent" || toolsEdition == "fips" {
+		edition = "ent-"
+	}
+
+	fips := ""
+	if toolsEdition == "fips" {
+		fips = "fips-"
+	}
+
+	format := ""
+	switch runtime.GOOS {
+	case "darwin":
+		format = "pkg"
+	case "windows":
+		format = "zip"
+	case "linux":
+		format = "tar.gz"
+	default:
+		return "", "", trace.BadParameter("unsupported runtime: %v", runtime.GOOS)
+	}
+
+	var b strings.Builder
+	b.WriteString("https://cdn.teleport.dev/teleport-")
+	if edition != "" {
+		b.WriteString(edition)
+	}
+	b.WriteString("v" + toolsVersion + "-" + runtime.GOOS + "-" + runtime.GOARCH + "-")
+	if fips != "" {
+		b.WriteString(fips)
+	}
+	b.WriteString("bin." + format)
+
+	return b.String(), b.String() + ".sha256", nil
+}
+
+/*
+func downloadDarwin() error {
 	//url := fmt.Sprintf("https://cdn.teleport.dev/teleport-v%v-darwin-arm64-bin.tar.gz", toolsVersion)
 	//// Create an HTTP client that follows redirects
 	//client := &http.Client{
@@ -277,14 +365,15 @@ func Exec() (int, error) {
 
 	return cmd.ProcessState.ExitCode(), nil
 }
+*/
 
 func lock() (func(), error) {
 	// Build the path to the lock file that will be used by flock.
-	path, err := toolPath()
+	dir, err := toolsDir()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	lockFile := filepath.Join(path, ".lock")
+	lockFile := filepath.Join(dir, ".lock")
 
 	// Create the advisory lock using flock.
 	// TODO(russjones): Use os.CreateTemp here?
@@ -310,10 +399,16 @@ func lock() (func(), error) {
 }
 
 func version() (string, error) {
-	path, err := toolPath()
+	// Find the path to the current executable.
+	dir, err := toolsDir()
 	if err != nil {
 		return "", trace.Wrap(err)
 	}
+	executable, err := os.Executable()
+	if err != nil {
+		return "", trace.Wrap(err)
+	}
+	path := filepath.Join(dir, filepath.Base(executable))
 
 	// Set a timeout to not let "{tsh, tctl} version" block forever. Allow up
 	// to 10 seconds because sometimes MDM tools like Jamf cause a lot of
@@ -348,14 +443,14 @@ func version() (string, error) {
 		if err != nil {
 			return "", trace.Wrap(err)
 		}
-		return version, nil
+		return version.String(), nil
 	}
 
-	return trace.BadParameter("unable to determine version")
+	return "", trace.BadParameter("unable to determine version")
 }
 
-// toolPath returns the path to {tsh, tctl} in $TELEPORT_HOME/bin.
-func toolPath() (string, error) {
+// toolsDir returns the path to {tsh, tctl} in $TELEPORT_HOME/bin.
+func toolsDir() (string, error) {
 	home := os.Getenv(types.HomeEnvVar)
 	if home == "" {
 		var err error
@@ -365,13 +460,13 @@ func toolPath() (string, error) {
 		}
 	}
 
-	executablePath, err := os.Executable()
-	if err != nil {
-		return "", trace.Wrap(err)
-	}
-	toolName := filepath.Base(executablePath)
+	//executablePath, err := os.Executable()
+	//if err != nil {
+	//	return "", trace.Wrap(err)
+	//}
+	//toolName := filepath.Base(executablePath)
 
-	return filepath.Join(filepath.Clean(home), ".tsh", "bin", toolName), nil
+	return filepath.Join(filepath.Clean(home), ".tsh", "bin"), nil
 }
 
 //func update() (bool, error) {
