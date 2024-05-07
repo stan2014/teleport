@@ -22,7 +22,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -158,23 +160,18 @@ func Download(toolsVersion string) error {
 //	}
 
 // TODO(russjones): Add edition check here as well.
-// For Linux:
-//   - https://cdn.teleport.dev/teleport-{ent-}v15.3.0-linux-{amd64,arm64}-{fips-}bin.tar.gz
-//
-// For macOS:
-//   - https://cdn.teleport.dev/teleport-{ent-}v15.3.0-darwin-{amd64,arm64}-bin.tar.gz
-//   - https://cdn.teleport.dev/teleport-v15.3.0-darwin-arm64-bin.tar.gz
 func update(toolsVersion string) error {
 	// Lock to allow multiple concurrent {tsh, tctl} to run.
 	unlock, err := lock()
 	defer unlock()
+
+	// TODO(russjones): Cleanup any partial downloads first.
 
 	archiveURL, hashURL, err := urls(toolsVersion, "")
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	log.Debugf("Archive download path: %v.", archiveURL)
-	fmt.Printf("Archive download path: %v.\n", archiveURL)
 
 	// Download the archive and validate against the hash. Download to a
 	// temporary path within $TELEPORT_HOME/bin.
@@ -182,17 +179,55 @@ func update(toolsVersion string) error {
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	fmt.Printf("Archive hash: %v.\n", hash)
-	//dir, err := downloadArchive(hash)
-	//if err != nil {
-	//	return trace.Wrap(err)
-	//}
+	dir, err := downloadAndExtract(archiveURL, hash)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	fmt.Printf("--> dir: %q\n", dir)
 
 	// Update permissions.
 
 	// Perform atomic replace. This ensures that exec will not fail.
 
 	return nil
+}
+
+// urls returns the URL for the Teleport archive to download. The format is:
+// https://cdn.teleport.dev/teleport-{, ent-}v15.3.0-{linux, darwin, windows}-{amd64,arm64,arm,386}-{fips-}bin.tar.gz
+func urls(toolsVersion string, toolsEdition string) (string, string, error) {
+	var archive string
+
+	switch runtime.GOOS {
+	case "darwin":
+		archive = "https://cdn.teleport.dev/teleport-" + toolsVersion + ".pkg"
+	case "windows":
+		archive = "https://cdn.teleport.dev/teleport-" + toolsVersion + "-windows-amd64-bin.zip"
+	case "linux":
+		edition := ""
+		if toolsEdition == "ent" || toolsEdition == "fips" {
+			edition = "ent-"
+		}
+		fips := ""
+		if toolsEdition == "fips" {
+			fips = "fips-"
+		}
+
+		var b strings.Builder
+		b.WriteString("https://cdn.teleport.dev/teleport-")
+		if edition != "" {
+			b.WriteString(edition)
+		}
+		b.WriteString("v" + toolsVersion + "-" + runtime.GOOS + "-" + runtime.GOARCH + "-")
+		if fips != "" {
+			b.WriteString(fips)
+		}
+		b.WriteString("bin.tar.gz")
+		archive = b.String()
+	default:
+		return "", "", trace.BadParameter("unsupported runtime: %v", runtime.GOOS)
+	}
+
+	return archive, archive + ".sha256", nil
 }
 
 func downloadHash(url string) (string, error) {
@@ -212,46 +247,43 @@ func downloadHash(url string) (string, error) {
 	}
 
 	// Hash is the first 64 bytes of the response.
-	return string(body)[0:63], nil
+	return string(body)[0:64], nil
 }
 
-// urls returns the URL for the Teleport archive to download. The format is:
-// https://cdn.teleport.dev/teleport-{, ent-}v15.3.0-{linux, darwin, windows}-{amd64,arm64,arm,386}-{fips-}bin.tar.gz
-func urls(toolsVersion string, toolsEdition string) (string, string, error) {
-	edition := ""
-	if toolsEdition == "ent" || toolsEdition == "fips" {
-		edition = "ent-"
+func downloadAndExtract(url string, hash string) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", trace.Wrap(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", trace.BadParameter("bad status when downloading archive: %v", resp.StatusCode)
 	}
 
-	fips := ""
-	if toolsEdition == "fips" {
-		fips = "fips-"
+	dir, err := toolsDir()
+	if err != nil {
+		return "", trace.Wrap(err)
+	}
+	f, err := os.CreateTemp(dir, "tmp-")
+	if err != nil {
+		return "", trace.Wrap(err)
+	}
+	defer os.Remove(f.Name())
+
+	// TODO(russjones): Add ability to Ctrl-C cancel here.
+	h := sha256.New()
+	hashReader := io.TeeReader(resp.Body, h)
+	body := io.TeeReader(hashReader, &progressWriter{n: 0, limit: resp.ContentLength})
+
+	_, err = io.Copy(f, body)
+	if err != nil {
+		return "", trace.Wrap(err)
+	}
+	if fmt.Sprintf("%x", h.Sum(nil)) != hash {
+		return "", trace.BadParameter("hash of archive does not match downloaded archive")
 	}
 
-	format := ""
-	switch runtime.GOOS {
-	case "darwin":
-		format = "pkg"
-	case "windows":
-		format = "zip"
-	case "linux":
-		format = "tar.gz"
-	default:
-		return "", "", trace.BadParameter("unsupported runtime: %v", runtime.GOOS)
-	}
-
-	var b strings.Builder
-	b.WriteString("https://cdn.teleport.dev/teleport-")
-	if edition != "" {
-		b.WriteString(edition)
-	}
-	b.WriteString("v" + toolsVersion + "-" + runtime.GOOS + "-" + runtime.GOARCH + "-")
-	if fips != "" {
-		b.WriteString(fips)
-	}
-	b.WriteString("bin." + format)
-
-	return b.String(), b.String() + ".sha256", nil
+	return f.Name(), nil
 }
 
 /*
@@ -493,6 +525,21 @@ func toolsDir() (string, error) {
 //func reexec() (int, error) {
 //	return 0, nil
 //}
+
+type progressWriter struct {
+	n     int64
+	limit int64
+}
+
+func (w *progressWriter) Write(p []byte) (int, error) {
+	w.n = w.n + int64(len(p))
+
+	n := int((w.n*100)/w.limit) / 10
+	bricks := strings.Repeat("▒", n) + strings.Repeat(" ", 10-n)
+	fmt.Printf("\rUpdate progress: [" + bricks + "] (Ctrl-C to cancel update)")
+
+	return len(p), nil
+}
 
 const (
 	teleportToolsVersion = "TELEPORT_TOOLS_VERSION"
