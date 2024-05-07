@@ -20,9 +20,14 @@ package services
 
 import (
 	"testing"
+	"time"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/require"
 
+	headerv1 "github.com/gravitational/teleport/api/gen/proto/go/teleport/header/v1"
+	"github.com/gravitational/teleport/api/gen/proto/go/teleport/vnet/v1"
 	"github.com/gravitational/teleport/api/types"
 )
 
@@ -238,4 +243,33 @@ func Test_setResourceName(t *testing.T) {
 			require.Equal(t, tt.want, result)
 		})
 	}
+}
+
+func TestProtoResourceRoundtrip(t *testing.T) {
+	resource := &vnet.VnetConfig{
+		Metadata: &headerv1.Metadata{
+			Name: "vnet_config",
+		},
+		Spec: &vnet.VnetConfigSpec{
+			CidrRange: "100.64.0.0/10",
+		},
+	}
+
+	marshalled, err := MarshalProtoResource(resource)
+	require.NoError(t, err)
+
+	unmarshalled, err := UnmarshalProtoResource[*vnet.VnetConfig](marshalled)
+	require.NoError(t, err)
+	require.Empty(t, cmp.Diff(resource, unmarshalled, cmpopts.IgnoreUnexported(vnet.VnetConfig{}, vnet.VnetConfigSpec{}, headerv1.Metadata{})))
+
+	revision := "123"
+	expires := time.Now()
+	resourceID := int64(1234)
+	unmarshalled, err = UnmarshalProtoResource[*vnet.VnetConfig](marshalled,
+		WithRevision(revision), WithExpires(expires), WithResourceID(resourceID))
+	require.NoError(t, err)
+	require.Equal(t, revision, unmarshalled.GetMetadata().GetRevision())
+	require.WithinDuration(t, expires, unmarshalled.GetMetadata().GetExpires().AsTime(), time.Millisecond)
+	require.Equal(t, resourceID, unmarshalled.GetMetadata().GetId())
+
 }

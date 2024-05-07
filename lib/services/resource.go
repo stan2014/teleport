@@ -27,11 +27,15 @@ import (
 
 	"github.com/gravitational/trace"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/protoadapt"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
+	headerv1 "github.com/gravitational/teleport/api/gen/proto/go/teleport/header/v1"
 	machineidv1pb "github.com/gravitational/teleport/api/gen/proto/go/teleport/machineid/v1"
 	"github.com/gravitational/teleport/api/types"
-	"github.com/gravitational/teleport/api/utils"
+	apiutils "github.com/gravitational/teleport/api/utils"
+	"github.com/gravitational/teleport/lib/utils"
 )
 
 // MarshalConfig specifies marshaling options
@@ -714,6 +718,67 @@ func UnmarshalResource(kind string, raw []byte, opts ...MarshalOption) (types.Re
 	return u, nil
 }
 
+// ProtoResource abstracts a resource defined as a protobuf message.
+type ProtoResource interface {
+	proto.Message
+	// GetMetadata returns the generic resource metadata.
+	GetMetadata() *headerv1.Metadata
+}
+
+// MarshalProtoResource marshals a ProtoResource to JSON.
+func MarshalProtoResource[T ProtoResource](resource T, opts ...MarshalOption) ([]byte, error) {
+	cfg, err := CollectOptions(opts)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	if !cfg.PreserveResourceID {
+		resource = proto.Clone(resource).(T)
+		//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
+		resource.GetMetadata().Id = 0
+		resource.GetMetadata().Revision = ""
+	}
+	data, err := utils.FastMarshal(resource)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return data, nil
+}
+
+// ProtoResourcePtr is a ProtoResource that is also a pointer to T.
+type ProtoResourcePtr[T any] interface {
+	*T
+	ProtoResource
+}
+
+// UnmarshalProtoResource unmarshals a ProtoResource from JSON. It is paramaterized on types T and U, where T
+// is a pointer type that implements ProtoResource, and U is the type that T points to. This is so that it can
+// allocate and instance of U to unmarshal into, without reflection.
+func UnmarshalProtoResource[T ProtoResourcePtr[U], U any](data []byte, opts ...MarshalOption) (T, error) {
+	if len(data) == 0 {
+		return nil, trace.BadParameter("nothing to unmarshal")
+	}
+	cfg, err := CollectOptions(opts)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	var resource T = new(U)
+	err = utils.FastUnmarshal(data, resource)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	if cfg.ID != 0 {
+		//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
+		resource.GetMetadata().Id = cfg.ID
+	}
+	if cfg.Revision != "" {
+		resource.GetMetadata().Revision = cfg.Revision
+	}
+	if !cfg.Expires.IsZero() {
+		resource.GetMetadata().Expires = timestamppb.New(cfg.Expires)
+	}
+	return resource, nil
+}
+
 // UnknownResource is used to detect resources
 type UnknownResource struct {
 	types.ResourceHeader
@@ -766,7 +831,7 @@ func maybeResetProtoResourceID[T resetProtoResource](preserveResourceID bool, r 
 		return r
 	}
 
-	cp := utils.CloneProtoMsg(r)
+	cp := apiutils.CloneProtoMsg(r)
 	cp.SetResourceID(0)
 	cp.SetRevision("")
 	return cp
