@@ -19,8 +19,11 @@
 package update
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -180,15 +183,19 @@ func update(toolsVersion string) error {
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	dir, err := downloadAndExtract(archiveURL, hash)
+	path, err := downloadArchive(archiveURL, hash)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	fmt.Printf("--> dir: %q\n", dir)
-
-	// Update permissions.
 
 	// Perform atomic replace. This ensures that exec will not fail.
+	dir, err := toolsDir()
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	if err := os.Rename(filepath.Join(dir, "tsh.app"), filepath.Join(path, "Payload", "tsh.app")); err != nil {
+		return trace.Wrap(err)
+	}
 
 	return nil
 }
@@ -203,7 +210,7 @@ func urls(toolsVersion string, toolsEdition string) (string, string, error) {
 		//archive = "https://cdn.teleport.dev/teleport-" + toolsVersion + ".pkg"
 		archive = "https://cdn.teleport.dev/tsh-" + toolsVersion + ".pkg"
 	case "windows":
-		archive = "https://cdn.teleport.dev/teleport-" + toolsVersion + "-windows-amd64-bin.zip"
+		archive = "https://cdn.teleport.dev/teleport-v" + toolsVersion + "-windows-amd64-bin.zip"
 	case "linux":
 		edition := ""
 		if toolsEdition == "ent" || toolsEdition == "fips" {
@@ -252,7 +259,7 @@ func downloadHash(url string) (string, error) {
 	return string(body)[0:64], nil
 }
 
-func downloadAndExtract(url string, hash string) (string, error) {
+func downloadArchive(url string, hash string) (string, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", trace.Wrap(err)
@@ -276,11 +283,14 @@ func downloadAndExtract(url string, hash string) (string, error) {
 	h := sha256.New()
 	pw := &progressWriter{n: 0, limit: resp.ContentLength}
 	body := io.TeeReader(io.TeeReader(resp.Body, h), pw)
+
+	// It is a little inefficient to download the file to disk and then re-load
+	// it into memory to unarchive later, but this is safer as it allows {tsh,
+	// tctl} to validate the hash before trying to operate on the archive.
 	_, err = io.Copy(f, body)
 	if err != nil {
 		return "", trace.Wrap(err)
 	}
-
 	if fmt.Sprintf("%x", h.Sum(nil)) != hash {
 		return "", trace.BadParameter("hash of archive does not match downloaded archive")
 	}
@@ -292,134 +302,121 @@ func downloadAndExtract(url string, hash string) (string, error) {
 			return "", trace.Wrap(err)
 		}
 
-		// pkgutil --expand-full tsh-14.3.13.pkg tsh-14-pkg/
-		pkgPath := filepath.Join(dir, uuid.New())
+		// pkgutil --expand-full NAME.pkg DIRECTORY/
+		pkgPath := filepath.Join(dir, uuid.NewString()+"-pkg")
 		out, err := exec.Command(pkgutil, "--expand-full", f.Name(), pkgPath).Output()
 		if err != nil {
 			log.Debugf("Failed to run pkgutil: %v: %v.", out, err)
 			return "", trace.Wrap(err)
 		}
+		return pkgPath, nil
 	case "linux":
+		tempDir, err := os.MkdirTemp(dir, "*-tar")
+		if err != nil {
+			return "", trace.Wrap(err)
+		}
+		defer os.Remove(tempDir)
+
+		f, err := os.Open(f.Name())
+		if err != nil {
+			return "", trace.Wrap(err)
+		}
+		gzipReader, err := gzip.NewReader(f)
+		if err != nil {
+			return "", trace.Wrap(err)
+		}
+		tarReader := tar.NewReader(gzipReader)
+		for {
+			header, err := tarReader.Next()
+			if err == io.EOF {
+				break
+			}
+			// Skip over any files in the archive that are not {tsh, tctl}.
+			if header.Name != "teleport/tctl" && header.Name != "teleport/tsh" {
+				if _, err := io.Copy(ioutil.Discard, tarReader); err != nil {
+					log.Debugf("Failed to discard %v: %v.", header.Name, err)
+				}
+				continue
+			}
+
+			filename := filepath.Join(tempDir, strings.TrimPrefix(header.Name, "teleport/"))
+			file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+			if err != nil {
+				return "", trace.Wrap(err)
+			}
+			_, err = io.Copy(file, tarReader)
+			if err != nil {
+				return "", trace.Wrap(err)
+			}
+		}
+		return tempDir, nil
 	case "windows":
+		tempDir, err := os.MkdirTemp(dir, "*-zip")
+		if err != nil {
+			return "", trace.Wrap(err)
+		}
+		defer os.Remove(tempDir)
+
+		f, err := os.Open(f.Name())
+		if err != nil {
+			return "", trace.Wrap(err)
+		}
+		zipReader, err := zip.NewReader(f, resp.ContentLength)
+		if err != nil {
+			return "", trace.Wrap(err)
+		}
+
+		for _, r := range zipReader.File {
+			if r.Name != "tsh.exe" {
+				continue
+			}
+
+			rr, err := r.Open()
+			if err != nil {
+				return "", trace.Wrap(err)
+			}
+			defer rr.Close()
+
+			filename := filepath.Join(tempDir, r.Name)
+			file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+			if err != nil {
+				return "", trace.Wrap(err)
+			}
+			_, err = io.Copy(file, rr)
+			if err != nil {
+				return "", trace.Wrap(err)
+			}
+			defer file.Close()
+		}
+		return tempDir, nil
 	default:
 		return "", trace.BadParameter("unsupported runtime: %v", runtime.GOOS)
 	}
-
-	return f.Name(), nil
 }
 
-/*
-func downloadDarwin() error {
-	//url := fmt.Sprintf("https://cdn.teleport.dev/teleport-v%v-darwin-arm64-bin.tar.gz", toolsVersion)
-	//// Create an HTTP client that follows redirects
-	//client := &http.Client{
-	//	CheckRedirect: func(req *http.Request, via []*http.Request) error {
-	//		return nil
-	//	},
-	//}
-
-	//// TODO(russjones): print progress here.
-	//resp, err := client.Get(url)
-	//if err != nil {
-	//	return err
-	//}
-	//defer resp.Body.Close()
-
-	//// TODO(russjones): fix this so the body can be used twice.
-	////// Get the expected hash from the hashURL
-	////expectedHashResp, err := http.Get(url + ".sha256")
-	////if err != nil {
-	////	return err
-	////}
-	////defer expectedHashResp.Body.Close()
-	////expectedHash, err := ioutil.ReadAll(expectedHashResp.Body)
-	////if err != nil {
-	////	return err
-	////}
-
-	////expectedHashString := strings.TrimSpace(string(expectedHash))
-	////parts := strings.Split(expectedHashString, " ")
-	////expectedHash = []byte(parts[0])
-
-	////// Check the hash of the file
-	////hash := sha256.New()
-	////if _, err := io.Copy(hash, resp.Body); err != nil {
-	////	return err
-	////}
-	////if fmt.Sprintf("%x", hash.Sum(nil)) != string(expectedHash) {
-	////	return fmt.Errorf("hash mismatch")
-	////}
-
-	//// Decompress the file
-	//gzipReader, err := gzip.NewReader(resp.Body)
-	//if err != nil {
-	//	return err
-	//}
-	//tarReader := tar.NewReader(gzipReader)
-	//for {
-	//	header, err := tarReader.Next()
-	//	if err == io.EOF {
-	//		break
-	//	}
-	//	// TODO(russjones): tbot?
-	//	if header.Name != "teleport/tctl" && header.Name != "teleport/tsh" {
-	//		if _, err := io.Copy(ioutil.Discard, tarReader); err != nil {
-	//			fmt.Printf("--> discard: %v\n")
-	//		}
-	//		continue
-	//	}
-
-	//	filename := filepath.Join(dir, strings.TrimPrefix(header.Name, "teleport/"))
-	//	file, err := os.Create(filename)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	_, err = io.Copy(file, tarReader)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	if err := file.Chmod(os.FileMode(0755)); err != nil {
-	//		return err
-	//	}
-	//	fmt.Printf("--> wrote %v\n", filename)
-	//}
-	//return nil
-
-	return trace.BadParameter("windows not supported yet")
-}
-
-func downloadUnix() error {
-	return trace.BadParameter("unix not supported yet")
-}
-
-func downloadWindows() error {
-	return trace.BadParameter("windows not supported yet")
-}
-
-func Exec() (int, error) {
-	path, err := toolPath()
-	if err != nil {
-		return 0, trace.Wrap(err)
-	}
-
-	//command := os.Args[1]
-	args := os.Args[1:]
-
-	cmd := exec.Command(path, args...)
-	cmd.Env = os.Environ()
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		// TODO(russjones): better error code here
-		fmt.Printf("--> trying to exec err: %v\n", err)
-		return 0, trace.Wrap(err)
-	}
-
-	return cmd.ProcessState.ExitCode(), nil
-}
-*/
+//func Exec() (int, error) {
+//	path, err := toolPath()
+//	if err != nil {
+//		return 0, trace.Wrap(err)
+//	}
+//
+//	//command := os.Args[1]
+//	args := os.Args[1:]
+//
+//	cmd := exec.Command(path, args...)
+//	cmd.Env = os.Environ()
+//	cmd.Stdin = os.Stdin
+//	cmd.Stdout = os.Stdout
+//	cmd.Stderr = os.Stderr
+//
+//	if err := cmd.Run(); err != nil {
+//		// TODO(russjones): better error code here
+//		fmt.Printf("--> trying to exec err: %v\n", err)
+//		return 0, trace.Wrap(err)
+//	}
+//
+//	return cmd.ProcessState.ExitCode(), nil
+//}
 
 func lock() (func(), error) {
 	// Build the path to the lock file that will be used by flock.
@@ -559,6 +556,10 @@ func (w *progressWriter) Write(p []byte) (int, error) {
 	n := int((w.n*100)/w.limit) / 10
 	bricks := strings.Repeat("▒", n) + strings.Repeat(" ", 10-n)
 	fmt.Printf("\rUpdate progress: [" + bricks + "] (Ctrl-C to cancel update)")
+
+	if w.n == w.limit {
+		fmt.Printf("\n")
+	}
 
 	return len(p), nil
 }
