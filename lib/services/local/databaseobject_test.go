@@ -270,9 +270,9 @@ func TestMarshalDatabaseObjectRoundTrip(t *testing.T) {
 	obj, err := databaseobject.NewDatabaseObject("dummy-table", spec)
 	require.NoError(t, err)
 
-	out, err := marshalDatabaseObject(obj)
+	out, err := services.MarshalProtoResource(obj)
 	require.NoError(t, err)
-	newObj, err := unmarshalDatabaseObject(out)
+	newObj, err := services.UnmarshalProtoResource[*dbobjectv1.DatabaseObject](out)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(obj, newObj), "messages are not equal")
 }

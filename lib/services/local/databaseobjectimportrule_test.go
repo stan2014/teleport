@@ -36,6 +36,7 @@ import (
 	"github.com/gravitational/teleport/api/types/label"
 	apilabels "github.com/gravitational/teleport/api/types/label"
 	"github.com/gravitational/teleport/lib/backend/memory"
+	"github.com/gravitational/teleport/lib/services"
 	"github.com/gravitational/teleport/lib/srv/db/common/databaseobjectimportrule"
 )
 
@@ -207,9 +208,9 @@ func TestMarshalDatabaseObjectImportRuleRoundTrip(t *testing.T) {
 		Spec: spec,
 	}
 
-	out, err := marshalDatabaseObjectImportRule(obj)
+	out, err := services.MarshalProtoResource(obj)
 	require.NoError(t, err)
-	newObj, err := unmarshalDatabaseObjectImportRule(out)
+	newObj, err := services.UnmarshalProtoResource[*databaseobjectimportrulev1.DatabaseObjectImportRule](out)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(obj, newObj), "messages are not equal")
 }

@@ -27,7 +27,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	notificationsv1 "github.com/gravitational/teleport/api/gen/proto/go/teleport/notifications/v1"
-	"github.com/gravitational/teleport/lib/utils"
 )
 
 // Notifications defines an interface for managing notifications.
@@ -79,48 +78,12 @@ func MarshalNotification(notification *notificationsv1.Notification, opts ...Mar
 		return nil, trace.Wrap(err)
 	}
 
-	cfg, err := CollectOptions(opts)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	if !cfg.PreserveResourceID {
-		notification = proto.Clone(notification).(*notificationsv1.Notification)
-		//nolint:staticcheck // SA1019. Deprecated, but still needed.
-		notification.Metadata.Id = 0
-		notification.Metadata.Revision = ""
-	}
-	data, err := utils.FastMarshal(notification)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	return data, nil
+	return MarshalProtoResource(notification, opts...)
 }
 
 // UnmarshalNotification unmarshals a Notification resource from JSON.
 func UnmarshalNotification(data []byte, opts ...MarshalOption) (*notificationsv1.Notification, error) {
-	if len(data) == 0 {
-		return nil, trace.BadParameter("missing notification data")
-	}
-	cfg, err := CollectOptions(opts)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	var obj notificationsv1.Notification
-	if err = utils.FastUnmarshal(data, &obj); err != nil {
-		return nil, trace.Wrap(err)
-	}
-	if cfg.ID != 0 {
-		//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
-		obj.Metadata.Id = cfg.ID
-	}
-	if cfg.Revision != "" {
-		obj.Metadata.Revision = cfg.Revision
-	}
-	if !cfg.Expires.IsZero() {
-		obj.Metadata.Expires = timestamppb.New(cfg.Expires)
-	}
-
-	return &obj, nil
+	return UnmarshalProtoResource[*notificationsv1.Notification](data, opts...)
 }
 
 // ValidateGlobalNotification verifies that the necessary fields are configured for a global notification object.
@@ -214,47 +177,12 @@ func MarshalUserNotificationState(notificationState *notificationsv1.UserNotific
 		return nil, trace.Wrap(err)
 	}
 
-	cfg, err := CollectOptions(opts)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	if !cfg.PreserveResourceID {
-		notificationState = proto.Clone(notificationState).(*notificationsv1.UserNotificationState)
-		//nolint:staticcheck // SA1019. Deprecated, but still needed.
-		notificationState.Metadata.Id = 0
-		notificationState.Metadata.Revision = ""
-	}
-	data, err := utils.FastMarshal(notificationState)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	return data, nil
+	return MarshalProtoResource(notificationState, opts...)
 }
 
 // UnmarshalUserNotificationState unmarshals a UserNotificationState resource from JSON.
 func UnmarshalUserNotificationState(data []byte, opts ...MarshalOption) (*notificationsv1.UserNotificationState, error) {
-	if len(data) == 0 {
-		return nil, trace.BadParameter("missing notification data")
-	}
-	cfg, err := CollectOptions(opts)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	var obj notificationsv1.UserNotificationState
-	if err = utils.FastUnmarshal(data, &obj); err != nil {
-		return nil, trace.Wrap(err)
-	}
-	if cfg.ID != 0 {
-		//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
-		obj.Metadata.Id = cfg.ID
-	}
-	if cfg.Revision != "" {
-		obj.Metadata.Revision = cfg.Revision
-	}
-	if !cfg.Expires.IsZero() {
-		obj.Metadata.Expires = timestamppb.New(cfg.Expires)
-	}
-	return &obj, nil
+	return UnmarshalProtoResource[*notificationsv1.UserNotificationState](data, opts...)
 }
 
 // ValidateUserLastSeenNotification verifies that the necessary fields are configured for a user's last seen notification timestamp object.
@@ -272,45 +200,10 @@ func MarshalUserLastSeenNotification(userLastSeenNotification *notificationsv1.U
 		return nil, trace.Wrap(err)
 	}
 
-	cfg, err := CollectOptions(opts)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	if !cfg.PreserveResourceID {
-		userLastSeenNotification = proto.Clone(userLastSeenNotification).(*notificationsv1.UserLastSeenNotification)
-		//nolint:staticcheck // SA1019. Deprecated, but still needed.
-		userLastSeenNotification.Metadata.Id = 0
-		userLastSeenNotification.Metadata.Revision = ""
-	}
-	data, err := utils.FastMarshal(userLastSeenNotification)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	return data, nil
+	return MarshalProtoResource(userLastSeenNotification, opts...)
 }
 
 // UnmarshalUserLastSeenNotification unmarshals a UserLastSeenNotification resource from JSON.
 func UnmarshalUserLastSeenNotification(data []byte, opts ...MarshalOption) (*notificationsv1.UserLastSeenNotification, error) {
-	if len(data) == 0 {
-		return nil, trace.BadParameter("missing notification data")
-	}
-	cfg, err := CollectOptions(opts)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	var obj notificationsv1.UserLastSeenNotification
-	if err = utils.FastUnmarshal(data, &obj); err != nil {
-		return nil, trace.Wrap(err)
-	}
-	if cfg.ID != 0 {
-		//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
-		obj.Metadata.Id = cfg.ID
-	}
-	if cfg.Revision != "" {
-		obj.Metadata.Revision = cfg.Revision
-	}
-	if !cfg.Expires.IsZero() {
-		obj.Metadata.Expires = timestamppb.New(cfg.Expires)
-	}
-	return &obj, nil
+	return UnmarshalProtoResource[*notificationsv1.UserLastSeenNotification](data, opts...)
 }
