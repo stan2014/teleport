@@ -36,6 +36,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/trace"
@@ -199,7 +200,8 @@ func urls(toolsVersion string, toolsEdition string) (string, string, error) {
 
 	switch runtime.GOOS {
 	case "darwin":
-		archive = "https://cdn.teleport.dev/teleport-" + toolsVersion + ".pkg"
+		//archive = "https://cdn.teleport.dev/teleport-" + toolsVersion + ".pkg"
+		archive = "https://cdn.teleport.dev/tsh-" + toolsVersion + ".pkg"
 	case "windows":
 		archive = "https://cdn.teleport.dev/teleport-" + toolsVersion + "-windows-amd64-bin.zip"
 	case "linux":
@@ -272,15 +274,35 @@ func downloadAndExtract(url string, hash string) (string, error) {
 
 	// TODO(russjones): Add ability to Ctrl-C cancel here.
 	h := sha256.New()
-	hashReader := io.TeeReader(resp.Body, h)
-	body := io.TeeReader(hashReader, &progressWriter{n: 0, limit: resp.ContentLength})
-
+	pw := &progressWriter{n: 0, limit: resp.ContentLength}
+	body := io.TeeReader(io.TeeReader(resp.Body, h), pw)
 	_, err = io.Copy(f, body)
 	if err != nil {
 		return "", trace.Wrap(err)
 	}
+
 	if fmt.Sprintf("%x", h.Sum(nil)) != hash {
 		return "", trace.BadParameter("hash of archive does not match downloaded archive")
+	}
+
+	switch runtime.GOOS {
+	case "darwin":
+		pkgutil, err := exec.LookPath("pkgutil")
+		if err != nil {
+			return "", trace.Wrap(err)
+		}
+
+		// pkgutil --expand-full tsh-14.3.13.pkg tsh-14-pkg/
+		pkgPath := filepath.Join(dir, uuid.New())
+		out, err := exec.Command(pkgutil, "--expand-full", f.Name(), pkgPath).Output()
+		if err != nil {
+			log.Debugf("Failed to run pkgutil: %v: %v.", out, err)
+			return "", trace.Wrap(err)
+		}
+	case "linux":
+	case "windows":
+	default:
+		return "", trace.BadParameter("unsupported runtime: %v", runtime.GOOS)
 	}
 
 	return f.Name(), nil
