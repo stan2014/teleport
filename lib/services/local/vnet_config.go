@@ -57,7 +57,7 @@ func (s *VnetConfigService) UpdateVnetConfig(ctx context.Context, vnetConfig *vn
 	if err := validateVnetConfig(vnetConfig); err != nil {
 		return nil, trace.Wrap(err)
 	}
-	return s.svc.UpdateResource(ctx, vnetConfig)
+	return s.svc.ConditionalUpdateResource(ctx, vnetConfig)
 }
 
 func (s *VnetConfigService) DeleteVnetConfig(ctx context.Context) error {
