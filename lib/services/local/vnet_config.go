@@ -60,6 +60,13 @@ func (s *VnetConfigService) UpdateVnetConfig(ctx context.Context, vnetConfig *vn
 	return s.svc.ConditionalUpdateResource(ctx, vnetConfig)
 }
 
+func (s *VnetConfigService) UpsertVnetConfig(ctx context.Context, vnetConfig *vnet.VnetConfig) (*vnet.VnetConfig, error) {
+	if err := validateVnetConfig(vnetConfig); err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return s.svc.UpsertResource(ctx, vnetConfig)
+}
+
 func (s *VnetConfigService) DeleteVnetConfig(ctx context.Context) error {
 	return s.svc.DeleteResource(ctx, vnetConfigSingletonName)
 }
