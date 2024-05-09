@@ -72,6 +72,12 @@ func (s *VnetConfigService) DeleteVnetConfig(ctx context.Context) error {
 }
 
 func validateVnetConfig(vnetConfig *vnet.VnetConfig) error {
+	if vnetConfig.GetKind() != types.KindVnetConfig {
+		return trace.BadParameter("kind must be %q", types.KindVnetConfig)
+	}
+	if vnetConfig.GetVersion() != types.V1 {
+		return trace.BadParameter("version must be %q", types.V1)
+	}
 	if vnetConfig.GetMetadata().GetName() != vnetConfigSingletonName {
 		return trace.BadParameter("name must be %q", vnetConfigSingletonName)
 	}
