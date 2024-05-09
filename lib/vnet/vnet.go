@@ -188,19 +188,19 @@ type Manager struct {
 
 type state struct {
 	mu                   sync.RWMutex
-	tcpHandlers          map[tcpip.Address]TCPHandler
+	tcpHandlers          map[uint32]TCPHandler
 	udpHandlers          map[tcpip.Address]UDPHandler
-	appIPs               map[string]tcpip.Address
+	appIPsv6             map[string]tcpip.Address
 	lastAssignedIPSuffix uint32
 }
 
 func newState() state {
 	return state{
-		tcpHandlers: make(map[tcpip.Address]TCPHandler),
+		tcpHandlers: make(map[uint32]TCPHandler),
 		udpHandlers: make(map[tcpip.Address]UDPHandler),
-		appIPs:      make(map[string]tcpip.Address),
-		// Suffix 0 is reserved, suffix 1 is assigned to the NIC, suffix 2 is assigned to the DNS server.
-		lastAssignedIPSuffix: 2,
+		appIPsv6:    make(map[string]tcpip.Address),
+		// Suffix 100.64.0.0 is reserved, 100.64.0.1 is assigned to the NIC.
+		lastAssignedIPSuffix: 100<<24 + 64<<16 + 0<<8 + 1,
 	}
 }
 
@@ -264,7 +264,7 @@ func NewManager(cfg *Config) (*Manager, error) {
 
 func createStack() (*stack.Stack, *channel.Endpoint, error) {
 	netStack := stack.New(stack.Options{
-		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv6.NewProtocol},
+		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol, ipv6.NewProtocol},
 		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol, udp.NewProtocol},
 	})
 
@@ -282,14 +282,24 @@ func createStack() (*stack.Stack, *channel.Endpoint, error) {
 
 func installVnetRoutes(stack *stack.Stack) error {
 	// Make the network stack pass all outbound IP packets to the NIC, regardless of destination IP address.
+	ipv4Subnet, err := tcpip.NewSubnet(tcpip.AddrFrom4([4]byte{}), tcpip.MaskFromBytes(make([]byte, 4)))
+	if err != nil {
+		return trace.Wrap(err, "creating VNet IPv4 subnet")
+	}
 	ipv6Subnet, err := tcpip.NewSubnet(tcpip.AddrFrom16([16]byte{}), tcpip.MaskFromBytes(make([]byte, 16)))
 	if err != nil {
 		return trace.Wrap(err, "creating VNet IPv6 subnet")
 	}
-	stack.SetRouteTable([]tcpip.Route{{
-		Destination: ipv6Subnet,
-		NIC:         nicID,
-	}})
+	stack.SetRouteTable([]tcpip.Route{
+		{
+			Destination: ipv4Subnet,
+			NIC:         nicID,
+		},
+		{
+			Destination: ipv6Subnet,
+			NIC:         nicID,
+		},
+	})
 	return nil
 }
 
@@ -417,7 +427,7 @@ func (m *Manager) handleTCP(req *tcp.ForwarderRequest) {
 func (m *Manager) getTCPHandler(addr tcpip.Address) (TCPHandler, bool) {
 	m.state.mu.RLock()
 	defer m.state.mu.RUnlock()
-	handler, ok := m.state.tcpHandlers[addr]
+	handler, ok := m.state.tcpHandlers[addrSuffixU32(addr)]
 	return handler, ok
 }
 
@@ -428,15 +438,19 @@ func (m *Manager) assignTCPHandler(handler TCPHandler, fqdn string) (tcpip.Addre
 	m.state.lastAssignedIPSuffix++
 	ipSuffix := m.state.lastAssignedIPSuffix
 
-	addr := ipv6WithSuffix(m.ipv6Prefix, u32ToBytes(ipSuffix))
+	ipv4 := tcpip.AddrFromSlice(u32ToBytes(ipSuffix))
+	ipv6 := ipv6WithSuffix(m.ipv6Prefix, u32ToBytes(ipSuffix))
 
-	m.state.tcpHandlers[addr] = handler
-	m.state.appIPs[fqdn] = addr
-	if err := m.addProtocolAddress(addr); err != nil {
-		return addr, trace.Wrap(err)
+	m.state.tcpHandlers[ipSuffix] = handler
+	m.state.appIPsv6[fqdn] = ipv6
+	if err := m.addProtocolAddress(ipv6); err != nil {
+		return tcpip.Address{}, trace.Wrap(err)
+	}
+	if err := m.addProtocolAddress(ipv4); err != nil {
+		return tcpip.Address{}, trace.Wrap(err)
 	}
 
-	return addr, nil
+	return ipv6, nil
 }
 
 func (m *Manager) handleUDP(req *udp.ForwarderRequest) {
@@ -504,10 +518,9 @@ func (m *Manager) ResolveA(ctx context.Context, fqdn string) (dns.Result, error)
 		return dns.Result{}, trace.Wrap(err)
 	}
 	if result.AAAA != ([16]byte{}) {
-		// Matched a known app but not supporting IPv4 yet, return NoRecord.
-		return dns.Result{
-			NoRecord: true,
-		}, nil
+		copy(result.A[:], result.AAAA[12:16])
+		result.AAAA = [16]byte{}
+		return result, nil
 	}
 	return result, nil
 }
@@ -555,7 +568,7 @@ func (m *Manager) resolveAAAA(ctx context.Context, fqdn string) (dns.Result, err
 func (m *Manager) appIPv6(fqdn string) (tcpip.Address, bool) {
 	m.state.mu.RLock()
 	defer m.state.mu.RUnlock()
-	ip, ok := m.state.appIPs[fqdn]
+	ip, ok := m.state.appIPsv6[fqdn]
 	return ip, ok
 }
 
@@ -668,6 +681,17 @@ func u32ToBytes(i uint32) []byte {
 	bytes[2] = byte(i >> 8)
 	bytes[3] = byte(i >> 0)
 	return bytes
+}
+
+func addrSuffixU32(addr tcpip.Address) uint32 {
+	bytes := addr.AsSlice()
+	bytes = bytes[len(bytes)-4:]
+	var i uint32
+	i += uint32(bytes[0]) << 24
+	i += uint32(bytes[1]) << 16
+	i += uint32(bytes[2]) << 8
+	i += uint32(bytes[3]) << 0
+	return i
 }
 
 // newConnWithCloseNotifier returns a net.Conn and a channel that will be closed when the conn is closed.

@@ -181,9 +181,11 @@ func createAndSetupTUNDeviceAsRoot(ctx context.Context, ipv6Prefix, dnsAddr stri
 		var err error
 		tunIPv6 := ipv6Prefix + "1"
 		cfg := osConfig{
-			tunName: tunName,
-			tunIPv6: tunIPv6,
-			dnsAddr: dnsAddr,
+			tunName:  tunName,
+			tunIPv6:  tunIPv6,
+			tunIPv4:  "100.64.0.1",
+			netmasks: []string{"100.64.0.0/10"},
+			dnsAddr:  dnsAddr,
 		}
 		if cfg.dnsZones, err = dnsZones(); err != nil {
 			errCh <- trace.Wrap(err, "getting DNS zones")
@@ -235,7 +237,9 @@ func createTUNDevice(ctx context.Context) (tun.Device, string, error) {
 
 type osConfig struct {
 	tunName  string
+	tunIPv4  string
 	tunIPv6  string
+	netmasks []string
 	dnsAddr  string
 	dnsZones []string
 }
