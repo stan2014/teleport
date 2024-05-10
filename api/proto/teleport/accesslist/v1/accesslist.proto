@@ -73,11 +73,23 @@ message AccessListSpec {
   AccessListGrants owner_grants = 11;
 
   // member_access_lists is a list of access lists that user
-  // membership should be fetched from
+  // membership should be fetched from. Members included are pulled
+  // from the members of the referenced nested access lists.
+  // If a cycle between access lists is introduced it will result in
+  // an error.
+  // In order for a member of a nested access list to be included in
+  // the access list referencing it, they must pass the membership
+  // requirements of the list including it.
   repeated AccessListRef member_access_lists = 12;
 
   // owner_access_lists is a list of access lists that owner
-  // membership should be fetched from
+  // membership should be fetched from. Owners included are pulled
+  // from the members of the referenced access lists.
+  // If a cycle between access lists is introduced it will result in
+  // an error.
+  // In order for an owner of a nested access list to be included in
+  // the access list referencing it, they must pass the ownership
+  // requirements of the list including it.
   repeated AccessListRef owner_access_lists = 13;
 }
 
@@ -86,8 +98,6 @@ message AccessListSpec {
 message AccessListRef {
   // name is the id of the parent access list
   string name = 1;
-  // title is the title of the parent access list
-  string title = 2;
 }
 
 // AccessListOwner is an owner of an access list.
