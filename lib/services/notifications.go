@@ -22,9 +22,6 @@ import (
 	"context"
 
 	"github.com/gravitational/trace"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	notificationsv1 "github.com/gravitational/teleport/api/gen/proto/go/teleport/notifications/v1"
 )
@@ -78,12 +75,12 @@ func MarshalNotification(notification *notificationsv1.Notification, opts ...Mar
 		return nil, trace.Wrap(err)
 	}
 
-	return MarshalProtoResource(notification, opts...)
+	return FastMarshalProtoResourceDeprecated(notification, opts...)
 }
 
 // UnmarshalNotification unmarshals a Notification resource from JSON.
 func UnmarshalNotification(data []byte, opts ...MarshalOption) (*notificationsv1.Notification, error) {
-	return UnmarshalProtoResource[*notificationsv1.Notification](data, opts...)
+	return FastUnmarshalProtoResourceDeprecated[*notificationsv1.Notification](data, opts...)
 }
 
 // ValidateGlobalNotification verifies that the necessary fields are configured for a global notification object.
@@ -113,49 +110,12 @@ func MarshalGlobalNotification(globalNotification *notificationsv1.GlobalNotific
 		return nil, trace.Wrap(err)
 	}
 
-	cfg, err := CollectOptions(opts)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	if !cfg.PreserveResourceID {
-		globalNotification = proto.Clone(globalNotification).(*notificationsv1.GlobalNotification)
-		//nolint:staticcheck // SA1019. Deprecated, but still needed.
-		globalNotification.Metadata.Id = 0
-		globalNotification.Metadata.Revision = ""
-	}
-	// We marshal with raw protojson here because utils.FastMarshal doesn't work with oneof.
-	data, err := protojson.Marshal(globalNotification)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	return data, nil
+	return MarshalProtoResource(globalNotification, opts...)
 }
 
 // UnmarshalGlobalNotification unmarshals a GlobalNotification resource from JSON.
 func UnmarshalGlobalNotification(data []byte, opts ...MarshalOption) (*notificationsv1.GlobalNotification, error) {
-	if len(data) == 0 {
-		return nil, trace.BadParameter("missing notification data")
-	}
-	cfg, err := CollectOptions(opts)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	var obj notificationsv1.GlobalNotification
-	// We unmarshal with raw protojson here because utils.FastUnmarshal doesn't work with oneof.
-	if err = protojson.Unmarshal(data, &obj); err != nil {
-		return nil, trace.Wrap(err)
-	}
-	if cfg.ID != 0 {
-		//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
-		obj.Metadata.Id = cfg.ID
-	}
-	if cfg.Revision != "" {
-		obj.Metadata.Revision = cfg.Revision
-	}
-	if !cfg.Expires.IsZero() {
-		obj.Metadata.Expires = timestamppb.New(cfg.Expires)
-	}
-	return &obj, nil
+	return UnmarshalProtoResource[*notificationsv1.GlobalNotification](data, opts...)
 }
 
 // ValidateUserNotificationState verifies that the necessary fields are configured for user notification state object.
@@ -177,12 +137,12 @@ func MarshalUserNotificationState(notificationState *notificationsv1.UserNotific
 		return nil, trace.Wrap(err)
 	}
 
-	return MarshalProtoResource(notificationState, opts...)
+	return FastMarshalProtoResourceDeprecated(notificationState, opts...)
 }
 
 // UnmarshalUserNotificationState unmarshals a UserNotificationState resource from JSON.
 func UnmarshalUserNotificationState(data []byte, opts ...MarshalOption) (*notificationsv1.UserNotificationState, error) {
-	return UnmarshalProtoResource[*notificationsv1.UserNotificationState](data, opts...)
+	return FastUnmarshalProtoResourceDeprecated[*notificationsv1.UserNotificationState](data, opts...)
 }
 
 // ValidateUserLastSeenNotification verifies that the necessary fields are configured for a user's last seen notification timestamp object.
@@ -200,10 +160,10 @@ func MarshalUserLastSeenNotification(userLastSeenNotification *notificationsv1.U
 		return nil, trace.Wrap(err)
 	}
 
-	return MarshalProtoResource(userLastSeenNotification, opts...)
+	return FastMarshalProtoResourceDeprecated(userLastSeenNotification, opts...)
 }
 
 // UnmarshalUserLastSeenNotification unmarshals a UserLastSeenNotification resource from JSON.
 func UnmarshalUserLastSeenNotification(data []byte, opts ...MarshalOption) (*notificationsv1.UserLastSeenNotification, error) {
-	return UnmarshalProtoResource[*notificationsv1.UserLastSeenNotification](data, opts...)
+	return FastUnmarshalProtoResourceDeprecated[*notificationsv1.UserLastSeenNotification](data, opts...)
 }

@@ -43,12 +43,12 @@ func MarshalKubeWaitingContainer(in *kubewaitingcontainerpb.KubernetesWaitingCon
 		return nil, trace.Wrap(err)
 	}
 
-	return MarshalProtoResource(in, opts...)
+	return FastMarshalProtoResourceDeprecated(in, opts...)
 }
 
 // UnmarshalKubeWaitingContainer unmarshals a KubernetesWaitingContainer resource from JSON.
 func UnmarshalKubeWaitingContainer(data []byte, opts ...MarshalOption) (*kubewaitingcontainerpb.KubernetesWaitingContainer, error) {
-	out, err := UnmarshalProtoResource[*kubewaitingcontainerpb.KubernetesWaitingContainer](data, opts...)
+	out, err := FastUnmarshalProtoResourceDeprecated[*kubewaitingcontainerpb.KubernetesWaitingContainer](data, opts...)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

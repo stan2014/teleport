@@ -246,6 +246,8 @@ func Test_setResourceName(t *testing.T) {
 }
 
 func TestProtoResourceRoundtrip(t *testing.T) {
+	t.Parallel()
+
 	resource := &vnet.VnetConfig{
 		Metadata: &headerv1.Metadata{
 			Name: "vnet_config",
@@ -255,22 +257,41 @@ func TestProtoResourceRoundtrip(t *testing.T) {
 		},
 	}
 
-	marshaled, err := MarshalProtoResource(resource)
-	require.NoError(t, err)
+	for _, tc := range []struct {
+		desc          string
+		marshalFunc   func(*vnet.VnetConfig, ...MarshalOption) ([]byte, error)
+		unmarshalFunc func([]byte, ...MarshalOption) (*vnet.VnetConfig, error)
+	}{
+		{
+			desc:          "deprecated",
+			marshalFunc:   FastMarshalProtoResourceDeprecated[*vnet.VnetConfig],
+			unmarshalFunc: FastUnmarshalProtoResourceDeprecated[*vnet.VnetConfig],
+		},
+		{
+			desc:          "new",
+			marshalFunc:   MarshalProtoResource[*vnet.VnetConfig],
+			unmarshalFunc: UnmarshalProtoResource[*vnet.VnetConfig],
+		},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			marshaled, err := tc.marshalFunc(resource)
+			require.NoError(t, err)
 
-	unmarshalled, err := UnmarshalProtoResource[*vnet.VnetConfig](marshaled)
-	require.NoError(t, err)
-	require.Empty(t, cmp.Diff(resource, unmarshalled, cmpopts.IgnoreUnexported(vnet.VnetConfig{}, vnet.VnetConfigSpec{}, headerv1.Metadata{})))
+			unmarshalled, err := tc.unmarshalFunc(marshaled)
+			require.NoError(t, err)
+			require.Empty(t, cmp.Diff(resource, unmarshalled, cmpopts.IgnoreUnexported(vnet.VnetConfig{}, vnet.VnetConfigSpec{}, headerv1.Metadata{})))
 
-	revision := "123"
-	expires := time.Now()
-	resourceID := int64(1234)
-	unmarshalled, err = UnmarshalProtoResource[*vnet.VnetConfig](marshaled,
-		WithRevision(revision), WithExpires(expires), WithResourceID(resourceID))
-	require.NoError(t, err)
-	require.Equal(t, revision, unmarshalled.GetMetadata().GetRevision())
-	require.WithinDuration(t, expires, unmarshalled.GetMetadata().GetExpires().AsTime(), time.Millisecond)
-	//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
-	require.Equal(t, resourceID, unmarshalled.GetMetadata().GetId())
+			revision := "123"
+			expires := time.Now()
+			resourceID := int64(1234)
+			unmarshalled, err = tc.unmarshalFunc(marshaled,
+				WithRevision(revision), WithExpires(expires), WithResourceID(resourceID))
+			require.NoError(t, err)
+			require.Equal(t, revision, unmarshalled.GetMetadata().GetRevision())
+			require.WithinDuration(t, expires, unmarshalled.GetMetadata().GetExpires().AsTime(), time.Millisecond)
+			//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
+			require.Equal(t, resourceID, unmarshalled.GetMetadata().GetId())
+		})
+	}
 
 }

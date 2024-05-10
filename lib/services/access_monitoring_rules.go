@@ -96,10 +96,10 @@ func ValidateAccessMonitoringRule(accessMonitoringRule *accessmonitoringrulesv1.
 
 // MarshalAccessMonitoringRule marshals AccessMonitoringRule resource to JSON.
 func MarshalAccessMonitoringRule(accessMonitoringRule *accessmonitoringrulesv1.AccessMonitoringRule, opts ...MarshalOption) ([]byte, error) {
-	return MarshalProtoResource(accessMonitoringRule, opts...)
+	return FastMarshalProtoResourceDeprecated(accessMonitoringRule, opts...)
 }
 
 // UnmarshalAccessMonitoringRule unmarshals the AccessMonitoringRule resource.
 func UnmarshalAccessMonitoringRule(data []byte, opts ...MarshalOption) (*accessmonitoringrulesv1.AccessMonitoringRule, error) {
-	return UnmarshalProtoResource[*accessmonitoringrulesv1.AccessMonitoringRule](data, opts...)
+	return FastUnmarshalProtoResourceDeprecated[*accessmonitoringrulesv1.AccessMonitoringRule](data, opts...)
 }

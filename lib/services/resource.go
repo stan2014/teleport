@@ -720,67 +720,6 @@ func UnmarshalResource(kind string, raw []byte, opts ...MarshalOption) (types.Re
 	return u, nil
 }
 
-// ProtoResource abstracts a resource defined as a protobuf message.
-type ProtoResource interface {
-	proto.Message
-	// GetMetadata returns the generic resource metadata.
-	GetMetadata() *headerv1.Metadata
-}
-
-// MarshalProtoResource marshals a ProtoResource to JSON.
-func MarshalProtoResource[T ProtoResource](resource T, opts ...MarshalOption) ([]byte, error) {
-	cfg, err := CollectOptions(opts)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	if !cfg.PreserveResourceID {
-		resource = proto.Clone(resource).(T)
-		//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
-		resource.GetMetadata().Id = 0
-		resource.GetMetadata().Revision = ""
-	}
-	data, err := utils.FastMarshal(resource)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	return data, nil
-}
-
-// ProtoResourcePtr is a ProtoResource that is also a pointer to T.
-type ProtoResourcePtr[T any] interface {
-	*T
-	ProtoResource
-}
-
-// UnmarshalProtoResource unmarshals a ProtoResource from JSON. It is paramaterized on types T and U, where T
-// is a pointer type that implements ProtoResource, and U is the type that T points to. This is so that it can
-// allocate and instance of U to unmarshal into, without reflection.
-func UnmarshalProtoResource[T ProtoResourcePtr[U], U any](data []byte, opts ...MarshalOption) (T, error) {
-	if len(data) == 0 {
-		return nil, trace.BadParameter("nothing to unmarshal")
-	}
-	cfg, err := CollectOptions(opts)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	var resource T = new(U)
-	err = utils.FastUnmarshal(data, resource)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	if cfg.ID != 0 {
-		//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
-		resource.GetMetadata().Id = cfg.ID
-	}
-	if cfg.Revision != "" {
-		resource.GetMetadata().Revision = cfg.Revision
-	}
-	if !cfg.Expires.IsZero() {
-		resource.GetMetadata().Expires = timestamppb.New(cfg.Expires)
-	}
-	return resource, nil
-}
-
 // UnknownResource is used to detect resources
 type UnknownResource struct {
 	types.ResourceHeader
@@ -837,4 +776,121 @@ func maybeResetProtoResourceID[T resetProtoResource](preserveResourceID bool, r 
 	cp.SetResourceID(0)
 	cp.SetRevision("")
 	return cp
+}
+
+// ProtoResource abstracts a resource defined as a protobuf message.
+type ProtoResource interface {
+	proto.Message
+	// GetMetadata returns the generic resource metadata.
+	GetMetadata() *headerv1.Metadata
+}
+
+// ProtoResourcePtr is a ProtoResource that is also a pointer to T.
+type ProtoResourcePtr[T any] interface {
+	*T
+	ProtoResource
+}
+
+// MarshalProtoResource marshals a ProtoResource to JSON using [protojson.Marshal] and respecting [opts].
+func MarshalProtoResource[T ProtoResource](resource T, opts ...MarshalOption) ([]byte, error) {
+	cfg, err := CollectOptions(opts)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	if !cfg.PreserveResourceID {
+		resource = proto.Clone(resource).(T)
+		//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
+		resource.GetMetadata().Id = 0
+		resource.GetMetadata().Revision = ""
+	}
+	data, err := protojson.Marshal(resource)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return data, nil
+}
+
+// UnmarshalProtoResource unmarshals a ProtoResource from JSON using [protojson.Unmarshal] and respecting [opts].
+// It is paramaterized on types T and U, where T is a pointer type that implements ProtoResource, and U is the
+// type that T points to. This is so that it can allocate an instance of U to unmarshal into without
+// reflection.
+func UnmarshalProtoResource[T ProtoResourcePtr[U], U any](data []byte, opts ...MarshalOption) (T, error) {
+	if len(data) == 0 {
+		return nil, trace.BadParameter("nothing to unmarshal")
+	}
+	cfg, err := CollectOptions(opts)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	var resource T = new(U)
+	err = protojson.Unmarshal(data, resource)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	if cfg.ID != 0 {
+		//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
+		resource.GetMetadata().Id = cfg.ID
+	}
+	if cfg.Revision != "" {
+		resource.GetMetadata().Revision = cfg.Revision
+	}
+	if !cfg.Expires.IsZero() {
+		resource.GetMetadata().Expires = timestamppb.New(cfg.Expires)
+	}
+	return resource, nil
+}
+
+// FastMarshalProtoResourceDeprecated marshals a ProtoResource to JSON using [utils.FastMarshal] and respecting [opts].
+//
+// Deprecated: this should not be used for new types, prefer [MarshalProtoResource]. Existing types should not
+// be converted to maintain compatibility.
+func FastMarshalProtoResourceDeprecated[T ProtoResource](resource T, opts ...MarshalOption) ([]byte, error) {
+	cfg, err := CollectOptions(opts)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	if !cfg.PreserveResourceID {
+		resource = proto.Clone(resource).(T)
+		//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
+		resource.GetMetadata().Id = 0
+		resource.GetMetadata().Revision = ""
+	}
+	data, err := utils.FastMarshal(resource)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return data, nil
+}
+
+// FastUnmarshalProtoResourceDeprecated unmarshals a ProtoResource from JSON using [utils.FastUnmarshal] and respecting [opts].
+// It is paramaterized on types T and U, where T is a pointer type that implements ProtoResource, and U is the
+// type that T points to. This is so that it can allocate an instance of U to unmarshal into without
+// reflection.
+//
+// Deprecated: this should not be used for new types, prefer [UnmarshalProtoResource]. Existing types should not
+// be converted to maintain compatibility.
+func FastUnmarshalProtoResourceDeprecated[T ProtoResourcePtr[U], U any](data []byte, opts ...MarshalOption) (T, error) {
+	if len(data) == 0 {
+		return nil, trace.BadParameter("nothing to unmarshal")
+	}
+	cfg, err := CollectOptions(opts)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	var resource T = new(U)
+	err = utils.FastUnmarshal(data, resource)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	if cfg.ID != 0 {
+		//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
+		resource.GetMetadata().Id = cfg.ID
+	}
+	if cfg.Revision != "" {
+		resource.GetMetadata().Revision = cfg.Revision
+	}
+	if !cfg.Expires.IsZero() {
+		resource.GetMetadata().Expires = timestamppb.New(cfg.Expires)
+	}
+	return resource, nil
 }

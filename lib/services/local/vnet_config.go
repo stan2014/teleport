@@ -18,12 +18,10 @@ package local
 
 import (
 	"context"
-	"log/slog"
 	"net"
 
 	"github.com/gravitational/trace"
 
-	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/api/gen/proto/go/teleport/vnet/v1"
 	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/teleport/lib/backend"
@@ -37,8 +35,7 @@ const (
 )
 
 type VnetConfigService struct {
-	slog *slog.Logger
-	svc  *generic.ServiceWrapper[*vnet.VnetConfig]
+	svc *generic.ServiceWrapper[*vnet.VnetConfig]
 }
 
 func NewVnetConfigService(backend backend.Backend) (*VnetConfigService, error) {
@@ -54,8 +51,7 @@ func NewVnetConfigService(backend backend.Backend) (*VnetConfigService, error) {
 	}
 
 	return &VnetConfigService{
-		svc:  svc,
-		slog: slog.With(teleport.ComponentKey, "VnetConfig.local"),
+		svc: svc,
 	}, nil
 }
 

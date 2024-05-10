@@ -74,8 +74,10 @@ func NewDatabaseObjectService(backend backend.Backend) (services.DatabaseObjects
 	service, err := generic.NewServiceWrapper(backend,
 		types.KindDatabaseObject,
 		databaseObjectPrefix,
-		services.MarshalProtoResource[*dbobjectv1.DatabaseObject],
-		services.UnmarshalProtoResource[*dbobjectv1.DatabaseObject],
+		//nolint:staticcheck // SA1019. Using this marshaler for json compatibility.
+		services.FastMarshalProtoResourceDeprecated[*dbobjectv1.DatabaseObject],
+		//nolint:staticcheck // SA1019. Using this unmarshaler for json compatibility.
+		services.FastUnmarshalProtoResourceDeprecated[*dbobjectv1.DatabaseObject],
 	)
 	if err != nil {
 		return nil, trace.Wrap(err)

@@ -208,9 +208,11 @@ func TestMarshalDatabaseObjectImportRuleRoundTrip(t *testing.T) {
 		Spec: spec,
 	}
 
-	out, err := services.MarshalProtoResource(obj)
+	//nolint:staticcheck // SA1019. Using this marshaler for json compatibility.
+	out, err := services.FastMarshalProtoResourceDeprecated(obj)
 	require.NoError(t, err)
-	newObj, err := services.UnmarshalProtoResource[*databaseobjectimportrulev1.DatabaseObjectImportRule](out)
+	//nolint:staticcheck // SA1019. Using this unmarshaler for json compatibility.
+	newObj, err := services.FastUnmarshalProtoResourceDeprecated[*databaseobjectimportrulev1.DatabaseObjectImportRule](out)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(obj, newObj), "messages are not equal")
 }
