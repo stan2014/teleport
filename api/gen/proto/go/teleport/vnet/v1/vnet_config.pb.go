@@ -121,9 +121,9 @@ type VnetConfigSpec struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	// CidrRange defines the IPv4 CIDR range that all IPv4 addresses for VNet
+	// Ipv4CidrRange defines the IPv4 CIDR range that all IPv4 addresses for VNet
 	// apps in this cluster will be assigned from. The default is "100.64.0.0/10".
-	CidrRange string `protobuf:"bytes,1,opt,name=cidr_range,json=cidrRange,proto3" json:"cidr_range,omitempty"`
+	Ipv4CidrRange string `protobuf:"bytes,1,opt,name=cidr_range,json=cidrRange,proto3" json:"cidr_range,omitempty"`
 	// CustomDnsZones defines a list of DNS zones that VNet should resolve requests for.
 	CustomDnsZones []*CustomDNSZone `protobuf:"bytes,2,rep,name=custom_dns_zones,json=customDnsZones,proto3" json:"custom_dns_zones,omitempty"`
 }
@@ -162,7 +162,7 @@ func (*VnetConfigSpec) Descriptor() ([]byte, []int) {
 
 func (x *VnetConfigSpec) GetCidrRange() string {
 	if x != nil {
-		return x.CidrRange
+		return x.Ipv4CidrRange
 	}
 	return ""
 }

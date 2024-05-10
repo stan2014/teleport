@@ -251,7 +251,7 @@ func TestProtoResourceRoundtrip(t *testing.T) {
 			Name: "vnet_config",
 		},
 		Spec: &vnet.VnetConfigSpec{
-			CidrRange: "100.64.0.0/10",
+			Ipv4CidrRange: "100.64.0.0/10",
 		},
 	}
 
