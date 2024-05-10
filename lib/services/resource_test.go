@@ -255,21 +255,22 @@ func TestProtoResourceRoundtrip(t *testing.T) {
 		},
 	}
 
-	marshalled, err := MarshalProtoResource(resource)
+	marshaled, err := MarshalProtoResource(resource)
 	require.NoError(t, err)
 
-	unmarshalled, err := UnmarshalProtoResource[*vnet.VnetConfig](marshalled)
+	unmarshalled, err := UnmarshalProtoResource[*vnet.VnetConfig](marshaled)
 	require.NoError(t, err)
 	require.Empty(t, cmp.Diff(resource, unmarshalled, cmpopts.IgnoreUnexported(vnet.VnetConfig{}, vnet.VnetConfigSpec{}, headerv1.Metadata{})))
 
 	revision := "123"
 	expires := time.Now()
 	resourceID := int64(1234)
-	unmarshalled, err = UnmarshalProtoResource[*vnet.VnetConfig](marshalled,
+	unmarshalled, err = UnmarshalProtoResource[*vnet.VnetConfig](marshaled,
 		WithRevision(revision), WithExpires(expires), WithResourceID(resourceID))
 	require.NoError(t, err)
 	require.Equal(t, revision, unmarshalled.GetMetadata().GetRevision())
 	require.WithinDuration(t, expires, unmarshalled.GetMetadata().GetExpires().AsTime(), time.Millisecond)
+	//nolint:staticcheck // SA1019. Id is deprecated, but still needed.
 	require.Equal(t, resourceID, unmarshalled.GetMetadata().GetId())
 
 }
