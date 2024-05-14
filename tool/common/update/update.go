@@ -19,8 +19,11 @@
 package update
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -300,10 +303,10 @@ func atomicReplace(path string) error {
 	switch runtime.GOOS {
 	case "darwin":
 		return trace.Wrap(replaceDarwin(path))
-	//case "linux":
-	//	return trace.Wrap(replaceLinux(path))
-	//case "windows":
-	//	return trace.Wrap(replaceWindows(path))
+	case "linux":
+		return trace.Wrap(replaceLinux(path))
+	case "windows":
+		return trace.Wrap(replaceWindows(path))
 	default:
 		return trace.BadParameter("unsupported runtime: %v", runtime.GOOS)
 	}
@@ -329,6 +332,11 @@ func replaceDarwin(path string) error {
 		log.Debugf("Failed to run pkgutil: %v: %v.", out, err)
 		return trace.Wrap(err)
 	}
+	defer func() {
+		if err := os.RemoveAll(pkgPath); err != nil {
+			fmt.Printf("--> os.Remove: %v\n", err)
+		}
+	}()
 
 	appPath := filepath.Join(pkgPath, "Payload", "tsh.app")
 	tempDir := renameio.TempDir(dir)
@@ -372,88 +380,107 @@ func replaceDarwin(path string) error {
 	return nil
 }
 
-//func replaceLinux() error {
-//	tempDir, err := os.MkdirTemp(dir, "*-tar")
-//	if err != nil {
-//		return "", trace.Wrap(err)
-//	}
-//	defer os.Remove(tempDir)
-//
-//	f, err := os.Open(f.Name())
-//	if err != nil {
-//		return "", trace.Wrap(err)
-//	}
-//	gzipReader, err := gzip.NewReader(f)
-//	if err != nil {
-//		return "", trace.Wrap(err)
-//	}
-//	tarReader := tar.NewReader(gzipReader)
-//	for {
-//		header, err := tarReader.Next()
-//		if err == io.EOF {
-//			break
-//		}
-//		// Skip over any files in the archive that are not {tsh, tctl}.
-//		if header.Name != "teleport/tctl" && header.Name != "teleport/tsh" {
-//			if _, err := io.Copy(ioutil.Discard, tarReader); err != nil {
-//				log.Debugf("Failed to discard %v: %v.", header.Name, err)
-//			}
-//			continue
-//		}
-//
-//		filename := filepath.Join(tempDir, strings.TrimPrefix(header.Name, "teleport/"))
-//		file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
-//		if err != nil {
-//			return "", trace.Wrap(err)
-//		}
-//		_, err = io.Copy(file, tarReader)
-//		if err != nil {
-//			return "", trace.Wrap(err)
-//		}
-//	}
-//	return tempDir, nil
-//}
-//
-//func replaceWindows() error {
-//	tempDir, err := os.MkdirTemp(dir, "*-zip")
-//	if err != nil {
-//		return "", trace.Wrap(err)
-//	}
-//	defer os.Remove(tempDir)
-//
-//	f, err := os.Open(f.Name())
-//	if err != nil {
-//		return "", trace.Wrap(err)
-//	}
-//	zipReader, err := zip.NewReader(f, resp.ContentLength)
-//	if err != nil {
-//		return "", trace.Wrap(err)
-//	}
-//
-//	for _, r := range zipReader.File {
-//		if r.Name != "tsh.exe" {
-//			continue
-//		}
-//
-//		rr, err := r.Open()
-//		if err != nil {
-//			return "", trace.Wrap(err)
-//		}
-//		defer rr.Close()
-//
-//		filename := filepath.Join(tempDir, r.Name)
-//		file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
-//		if err != nil {
-//			return "", trace.Wrap(err)
-//		}
-//		_, err = io.Copy(file, rr)
-//		if err != nil {
-//			return "", trace.Wrap(err)
-//		}
-//		defer file.Close()
-//	}
-//	return tempDir, nil
-//}
+func replaceLinux(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	gzipReader, err := gzip.NewReader(f)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	dir, err := toolsDir()
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	tempDir := renameio.TempDir(dir)
+
+	tarReader := tar.NewReader(gzipReader)
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		// Skip over any files in the archive that are not {tsh, tctl}.
+		if header.Name != "teleport/tctl" &&
+			header.Name != "teleport/tsh" &&
+			header.Name != "teleport/tbot" {
+			if _, err := io.Copy(ioutil.Discard, tarReader); err != nil {
+				log.Debugf("Failed to discard %v: %v.", header.Name, err)
+			}
+			continue
+		}
+
+		dest := filepath.Join(dir, strings.TrimPrefix(header.Name, "teleport/"))
+		t, err := renameio.TempFile(tempDir, dest)
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		if err := os.Chmod(t.Name(), 0755); err != nil {
+			return trace.Wrap(err)
+		}
+		defer t.Cleanup()
+
+		if _, err := io.Copy(t, tarReader); err != nil {
+			return trace.Wrap(err)
+		}
+		if err := t.CloseAtomicallyReplace(); err != nil {
+			return trace.Wrap(err)
+		}
+	}
+	return nil
+}
+
+func replaceWindows(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	zipReader, err := zip.NewReader(f, fi.Size())
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	dir, err := toolsDir()
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	tempDir := renameio.TempDir(dir)
+
+	for _, r := range zipReader.File {
+		if r.Name != "tsh.exe" {
+			continue
+		}
+		rr, err := r.Open()
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		defer rr.Close()
+
+		dest := filepath.Join(dir, r.Name)
+		t, err := renameio.TempFile(tempDir, dest)
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		if err := os.Chmod(t.Name(), 0755); err != nil {
+			return trace.Wrap(err)
+		}
+		defer t.Cleanup()
+
+		if _, err := io.Copy(t, rr); err != nil {
+			return trace.Wrap(err)
+		}
+		if err := t.CloseAtomicallyReplace(); err != nil {
+			return trace.Wrap(err)
+		}
+	}
+	return nil
+}
 
 //func Exec() (int, error) {
 //	path, err := toolPath()
