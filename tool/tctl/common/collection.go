@@ -19,6 +19,7 @@
 package common
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
@@ -1521,6 +1522,111 @@ func (c *accessRequestCollection) writeText(w io.Writer, verbose bool) error {
 		t = asciitable.MakeTableWithTruncatedColumn([]string{"Name", "User", "Roles", "Annotations"}, rows, "Annotations")
 	}
 
+	_, err := t.AsBuffer().WriteTo(w)
+	return trace.Wrap(err)
+}
+
+type pluginCollection struct {
+	plugins []types.Plugin
+}
+
+type pluginResourceWrapper struct {
+	types.PluginV1
+}
+
+func (p *pluginResourceWrapper) UnmarshalJSON(data []byte) error {
+	type unknownPluginType struct {
+		Spec struct {
+			Settings map[string]json.RawMessage `json:"Settings"`
+		} `json:"spec"`
+		Credentials struct {
+			Credentials map[string]json.RawMessage `json:"Credentials"`
+		} `json:"credentials"`
+	}
+
+	var unknownPlugin unknownPluginType
+	if err := json.Unmarshal(data, &unknownPlugin); err != nil {
+		return err
+	}
+
+	if unknownPlugin.Spec.Settings == nil {
+		return trace.BadParameter("plugin settings are missing")
+	}
+	if len(unknownPlugin.Spec.Settings) != 1 {
+		return trace.BadParameter("unknown plugin settings count")
+	}
+
+	if len(unknownPlugin.Credentials.Credentials) == 1 {
+		p.PluginV1.Credentials = &types.PluginCredentialsV1{}
+		for k, _ := range unknownPlugin.Credentials.Credentials {
+			switch k {
+			case "oauth2_access_token":
+				p.PluginV1.Credentials.Credentials = &types.PluginCredentialsV1_Oauth2AccessToken{}
+			case "bearer_token":
+				p.PluginV1.Credentials.Credentials = &types.PluginCredentialsV1_BearerToken{}
+			case "id_secret":
+				p.PluginV1.Credentials.Credentials = &types.PluginCredentialsV1_IdSecret{}
+			case "static_credentials_ref":
+				p.PluginV1.Credentials.Credentials = &types.PluginCredentialsV1_StaticCredentialsRef{}
+			default:
+				return trace.BadParameter("unsupported plugin credential type: %v", k)
+			}
+		}
+	}
+
+	for k, _ := range unknownPlugin.Spec.Settings {
+		switch k {
+		case "slack_access_plugin":
+			p.PluginV1.Spec.Settings = &types.PluginSpecV1_SlackAccessPlugin{}
+		case "opsgenie":
+			p.PluginV1.Spec.Settings = &types.PluginSpecV1_Opsgenie{}
+		case "openai":
+			p.PluginV1.Spec.Settings = &types.PluginSpecV1_Openai{}
+		case "okta":
+			p.PluginV1.Spec.Settings = &types.PluginSpecV1_Okta{}
+		case "jamf":
+			p.PluginV1.Spec.Settings = &types.PluginSpecV1_Jamf{}
+		case "pager_duty":
+			p.PluginV1.Spec.Settings = &types.PluginSpecV1_PagerDuty{}
+		case "mattermost":
+			p.PluginV1.Spec.Settings = &types.PluginSpecV1_Mattermost{}
+		case "jira":
+			p.PluginV1.Spec.Settings = &types.PluginSpecV1_Jira{}
+		case "discord":
+			p.PluginV1.Spec.Settings = &types.PluginSpecV1_Discord{}
+		case "serviceNow":
+			p.PluginV1.Spec.Settings = &types.PluginSpecV1_ServiceNow{}
+		case "gitlab":
+			p.PluginV1.Spec.Settings = &types.PluginSpecV1_Gitlab{}
+		case "entra_id":
+			p.PluginV1.Spec.Settings = &types.PluginSpecV1_EntraId{}
+		default:
+			return trace.BadParameter("unsupported plugin type: %v", k)
+		}
+	}
+
+	if err := json.Unmarshal(data, &p.PluginV1); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *pluginCollection) resources() []types.Resource {
+	r := make([]types.Resource, len(c.plugins))
+	for i, resource := range c.plugins {
+		r[i] = resource
+	}
+	return r
+}
+
+func (c *pluginCollection) writeText(w io.Writer, verbose bool) error {
+	t := asciitable.MakeTable([]string{"Name", "Status"})
+	for _, plugin := range c.plugins {
+		t.AddRow([]string{
+			plugin.GetName(),
+			plugin.GetStatus().GetCode().String(),
+		})
+	}
 	_, err := t.AsBuffer().WriteTo(w)
 	return trace.Wrap(err)
 }
