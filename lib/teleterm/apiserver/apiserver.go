@@ -55,6 +55,7 @@ func New(cfg Config) (*APIServer, error) {
 		DaemonService:      cfg.Daemon,
 		ClientStore:        cfg.ClientStore,
 		InsecureSkipVerify: cfg.InsecureSkipVerify,
+		ClusterIDCache:     cfg.ClusterIDCache,
 		InstallationID:     cfg.InstallationID,
 	})
 	if err != nil {
