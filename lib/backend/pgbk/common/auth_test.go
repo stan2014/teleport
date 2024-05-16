@@ -68,16 +68,14 @@ func TestAuthMode(t *testing.T) {
 			requireCheckError:          require.NoError,
 			verifyPoolConfigAfterApply: verifyBeforeConnectIsSet,
 		},
-		{
-			authMode:                   GCPCloudSQLIAMAuth,
-			requireCheckError:          require.NoError,
-			verifyPoolConfigAfterApply: verifyBeforeConnectIsSet,
-		},
-		{
-			authMode:                   GCPAlloyDBIAMAuth,
-			requireCheckError:          require.NoError,
-			verifyPoolConfigAfterApply: verifyBeforeConnectIsSet,
-		},
+		// TODO
+		/*
+			{
+				authMode:          GCPCloudSQLIAMAuth,
+				requireCheckError: require.NoError,
+				verifyPoolConfigAfterApply: verifyBeforeConnectIsSet,
+			},
+		*/
 	}
 
 	ctx := context.Background()

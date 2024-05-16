@@ -2976,13 +2976,15 @@ func TestApplyTraits(t *testing.T) {
 		{
 			comment: "database name/user/role external vars in allow rule",
 			inTraits: map[string][]string{
-				"foo": {"bar"},
+				"foo":           {"bar"},
+				"redshift_user": {"JakeDe Jesus"},
+				"email":         {"jake.dejesus@spothero.com"},
 			},
 			allow: rule{
 				inDBNames:  []string{"{{external.foo}}", "{{external.baz}}", "postgres"},
 				outDBNames: []string{"bar", "postgres"},
-				inDBUsers:  []string{"{{external.foo}}", "{{external.baz}}", "postgres"},
-				outDBUsers: []string{"bar", "postgres"},
+				inDBUsers:  []string{`{{regexp.replace(external.email, "^(.*)\\.(.*)@spothero.com$", "$1$2")}}`},
+				outDBUsers: []string{"jakedejesus"},
 				inDBRoles:  []string{"{{external.foo}}", "{{external.baz}}", "postgres"},
 				outDBRoles: []string{"bar", "postgres"},
 			},
