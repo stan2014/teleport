@@ -263,14 +263,13 @@ func TestRecoveryCodesCRUD(t *testing.T) {
 	})
 }
 
-// TestNotificationCRUD tests that notification objects associated with a user are deleted
+// TestNotificationCleanupOnUserDelete tests that notification objects associated with a user are deleted
 // when the user is deleted.
 func TestNotificationCleanupOnUserDelete(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	clock := clockwork.NewFakeClock()
 
-	t.Helper()
 	backend, err := memory.New(memory.Config{
 		Context: context.Background(),
 		Clock:   clock,

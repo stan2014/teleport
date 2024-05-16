@@ -66,7 +66,7 @@ type IdentityService struct {
 	backend.Backend
 	log              logrus.FieldLogger
 	bcryptCost       int
-	notificationsSvc NotificationsService
+	notificationsSvc *NotificationsService
 }
 
 // NewIdentityService returns a new instance of IdentityService object
@@ -80,7 +80,7 @@ func NewIdentityService(backend backend.Backend) *IdentityService {
 		Backend:          backend,
 		log:              logrus.WithField(teleport.ComponentKey, "identity"),
 		bcryptCost:       bcrypt.DefaultCost,
-		notificationsSvc: *notificationsSvc,
+		notificationsSvc: notificationsSvc,
 	}
 }
 
@@ -688,15 +688,21 @@ func (s *IdentityService) DeleteUser(ctx context.Context, user string) error {
 	}
 
 	// Delete notification objects associated with this user.
-	if (s.notificationsSvc != NotificationsService{}) {
+	if (s.notificationsSvc != &NotificationsService{}) {
 		// Delete all user-specific notifications for this user.
-		if err = s.notificationsSvc.DeleteAllUserNotificationsForUser(ctx, user); err != nil {
-			return trace.Wrap(err)
-		}
+		deleteNotifsErr := s.notificationsSvc.DeleteAllUserNotificationsForUser(ctx, user)
 
 		// Delete all user notification states for this user.
-		if err = s.notificationsSvc.DeleteAllUserNotificationStatesForUser(ctx, user); err != nil {
-			return trace.Wrap(err)
+		deleteNotifStatesErr := s.notificationsSvc.DeleteAllUserNotificationStatesForUser(ctx, user)
+
+		if deleteNotifsErr != nil && deleteNotifStatesErr != nil {
+			return trace.NewAggregate(deleteNotifsErr, deleteNotifStatesErr)
+		}
+		if deleteNotifsErr != nil {
+			return trace.Wrap(deleteNotifsErr, "failed to delete notifications for user %s", user)
+		}
+		if deleteNotifStatesErr != nil {
+			return trace.Wrap(deleteNotifStatesErr, "failed to delete notification states for user %s", user)
 		}
 	}
 
