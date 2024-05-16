@@ -49,20 +49,19 @@ import { useTeleport } from '..';
 
 import { NotificationContent } from './notificationContentFactory';
 
-import { View } from './Notifications';
-
 export function Notification({
   notification,
-  view = 'All',
   closeNotificationsList,
+  removeNotification,
+  markNotificationAsClicked,
 }: {
   notification: NotificationType;
-  view?: View;
   closeNotificationsList: () => void;
+  removeNotification?: (notificationId: string) => void;
+  markNotificationAsClicked?: (notificationId: string) => void;
 }) {
   const ctx = useTeleport();
   const { clusterId } = useStickyClusterId();
-  const [clicked, setClicked] = useState(notification.clicked);
 
   const content = ctx.notificationContentFactory(notification);
 
@@ -73,29 +72,47 @@ export function Notification({
         notificationState: NotificationState.CLICKED,
       })
       .then(res => {
-        setClicked(true);
+        markNotificationAsClicked(notification.id);
         return res;
       })
   );
 
   const [hideNotificationAttempt, hideNotification] = useAsync(() => {
-    return ctx.notificationService.upsertNotificationState(clusterId, {
-      notificationId: notification.id,
-      notificationState: NotificationState.DISMISSED,
-    });
+    return ctx.notificationService
+      .upsertNotificationState(clusterId, {
+        notificationId: notification.id,
+        notificationState: NotificationState.DISMISSED,
+      })
+      .then(() => {
+        removeNotification(notification.id);
+      });
   });
+
+  function onMarkAsClicked() {
+    if (notification.localNotification) {
+      ctx.storeNotifications.markNotificationAsClicked(notification.id);
+      markNotificationAsClicked(notification.id);
+      return;
+    }
+    markAsClicked();
+  }
+
+  function onHide() {
+    if (notification.localNotification) {
+      ctx.storeNotifications.markNotificationAsHidden(notification.id);
+      removeNotification(notification.id);
+      return;
+    }
+    hideNotification();
+  }
+
   // Whether to show the text content dialog. This is only ever used for user-created notifications which only contain informational text
   // and don't redirect to any page.
   const [showTextContentDialog, setShowTextContentDialog] = useState(false);
 
   // If the notification is unsupported or hidden, or if the view is "Unread" and the notification has been read,
   // it should not be shown.
-  if (
-    !content ||
-    hideNotificationAttempt.status === 'success' ||
-    hideNotificationAttempt.status === 'processing' ||
-    (view === 'Unread' && clicked)
-  ) {
+  if (!content) {
     return null;
   }
 
@@ -119,7 +136,7 @@ export function Notification({
   const formattedDate = formatDate(notification.createdDate);
 
   function onNotificationClick(e: React.MouseEvent<HTMLElement>) {
-    markAsClicked();
+    onMarkAsClicked();
     // Prevents this from being triggered when the user is just clicking away from
     // an open "mark as read/hide this notification" menu popover.
     if (e.currentTarget.contains(e.target as HTMLElement)) {
@@ -133,15 +150,12 @@ export function Notification({
   }
 
   const isClicked =
-    clicked ||
-    markAsClickedAttempt.status === 'processing' ||
-    (markAsClickedAttempt.status === 'success' &&
-      markAsClickedAttempt.data.notificationState ===
-        NotificationState.CLICKED);
+    notification.clicked || markAsClickedAttempt.status === 'processing';
 
   return (
     <>
       <Container
+        data-testid="notification-item"
         clicked={isClicked}
         onClick={onNotificationClick}
         className="notification"
@@ -158,7 +172,7 @@ export function Notification({
           <ContentBody>
             <Text>{content.title}</Text>
             {content.kind === 'redirect' && content.QuickAction && (
-              <content.QuickAction markAsClicked={markAsClicked} />
+              <content.QuickAction markAsClicked={onMarkAsClicked} />
             )}
             {hideNotificationAttempt.status === 'error' && (
               <Text typography="subtitle3" color="error.main">
@@ -185,16 +199,13 @@ export function Notification({
             >
               {!isClicked && (
                 <MenuItem
-                  onClick={markAsClicked}
+                  onClick={onMarkAsClicked}
                   className={IGNORE_CLICK_CLASSNAME}
                 >
                   Mark as read
                 </MenuItem>
               )}
-              <MenuItem
-                onClick={hideNotification}
-                className={IGNORE_CLICK_CLASSNAME}
-              >
+              <MenuItem onClick={onHide} className={IGNORE_CLICK_CLASSNAME}>
                 Hide this notification
               </MenuItem>
             </MenuIcon>

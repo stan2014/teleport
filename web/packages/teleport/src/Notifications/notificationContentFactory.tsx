@@ -24,6 +24,7 @@ import {
   Notification as NotificationType,
   NotificationSubKind,
 } from 'teleport/services/notifications';
+import { NotificationKind as StoreNotificationsKind } from 'teleport/stores/storeNotifications';
 import { Label } from 'teleport/types';
 
 /**
@@ -62,6 +63,18 @@ export function notificationContentFactory({
       };
       break;
     }
+
+    case StoreNotificationsKind.AccessList:
+      const redirectRoute = getLabelValue(labels, 'redirect-route');
+
+      notificationContent = {
+        kind: 'redirect',
+        title: notification.title,
+        type: 'warning',
+        icon: Icons.UserList,
+        redirectRoute,
+      };
+      break;
     default:
       return null;
   }
@@ -87,7 +100,7 @@ type NotificationContentRedirect = NotificationContentBase & {
   QuickAction?: (props: QuickActionProps) => JSX.Element;
 };
 
-export type QuickActionProps = { markAsClicked: () => Promise<any> };
+export type QuickActionProps = { markAsClicked: () => void };
 
 /** For notifications that only contain text and are not interactive in any other way. This is used for user-created notifications. */
 type NotificationContentText = NotificationContentBase & {
