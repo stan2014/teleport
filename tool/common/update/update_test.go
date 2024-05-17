@@ -24,6 +24,6 @@ import (
 )
 
 func TestUpdate(t *testing.T) {
-	err := update("15.3.0")
+	err := update("15.3.4")
 	fmt.Printf("--> err: %v.\n", err)
 }

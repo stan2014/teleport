@@ -528,9 +528,9 @@ func lock() (func(), error) {
 		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_UN); err != nil {
 			log.Debugf("Failed to unlock file: %v: %v.", lockFile, err)
 		}
-		if err := os.Remove(lockFile); err != nil {
-			log.Debugf("Failed to remove lock file: %v: %v.", lockFile, err)
-		}
+		//if err := os.Remove(lockFile); err != nil {
+		//	log.Debugf("Failed to remove lock file: %v: %v.", lockFile, err)
+		//}
 		if err := lf.Close(); err != nil {
 			log.Debugf("Failed to close lock file %v: %v.", lockFile, err)
 		}

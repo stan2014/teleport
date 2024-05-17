@@ -52,7 +52,6 @@ import (
 	"github.com/gravitational/teleport/lib/service/servicecfg"
 	"github.com/gravitational/teleport/lib/utils"
 	"github.com/gravitational/teleport/tool/common"
-	"github.com/gravitational/teleport/tool/common/update"
 )
 
 const (
@@ -103,18 +102,18 @@ type CLICommand interface {
 //
 // distribution: name of the Teleport distribution
 func Run(commands []CLICommand) {
-	toolsVersion, reexec := update.Check()
-	if reexec {
-		// Re-execute client tools with the correct version of client tools.
-		fmt.Printf("--> [INIT] will rexec with: %v.\n", toolsVersion)
-		code, err := update.Exec()
-		if err != nil {
-			log.Debugf("--> [INIT] err: %v", err)
-			//return trace.Wrap(err)
-		} else {
-			os.Exit(code)
-		}
-	}
+	//toolsVersion, reexec := update.Check()
+	//if reexec {
+	//	// Re-execute client tools with the correct version of client tools.
+	//	fmt.Printf("--> [INIT] will rexec with: %v.\n", toolsVersion)
+	//	code, err := update.Exec()
+	//	if err != nil {
+	//		log.Debugf("--> [INIT] err: %v", err)
+	//		//return trace.Wrap(err)
+	//	} else {
+	//		os.Exit(code)
+	//	}
+	//}
 
 	err := TryRun(commands, os.Args[1:])
 	if err != nil {

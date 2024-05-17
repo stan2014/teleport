@@ -88,7 +88,6 @@ import (
 	"github.com/gravitational/teleport/lib/utils/diagnostics/latency"
 	"github.com/gravitational/teleport/lib/utils/mlock"
 	"github.com/gravitational/teleport/tool/common"
-	"github.com/gravitational/teleport/tool/common/update"
 )
 
 var log = logrus.WithFields(logrus.Fields{
@@ -690,24 +689,24 @@ func Run(ctx context.Context, args []string, opts ...CliOption) error {
 	// and the version differs from the running binary, download and re-execute
 	// correct binary. But the problem is if we store everyone in TSH_HOME
 	// there is no longer a current-profile??
-	toolsVersion, reexec := update.Check()
-	if reexec {
-		//// Download the version of client tools required by the cluster.
-		//// Download may be a NOP if tools is already downloaded.
-		//if err := update.Download(toolsVersion); err != nil {
-		//	return trace.Wrap(err)
-		//}
+	//toolsVersion, reexec := update.Check()
+	//if reexec {
+	//	//// Download the version of client tools required by the cluster.
+	//	//// Download may be a NOP if tools is already downloaded.
+	//	//if err := update.Download(toolsVersion); err != nil {
+	//	//	return trace.Wrap(err)
+	//	//}
 
-		// Re-execute client tools with the correct version of client tools.
-		fmt.Printf("--> [INIT] will rexec with: %v.\n", toolsVersion)
-		code, err := update.Exec()
-		if err != nil {
-			log.Debugf("--> [INIT] err: %v", err)
-			//return trace.Wrap(err)
-		} else {
-			os.Exit(code)
-		}
-	}
+	//	// Re-execute client tools with the correct version of client tools.
+	//	fmt.Printf("--> [INIT] will rexec with: %v.\n", toolsVersion)
+	//	code, err := update.Exec()
+	//	if err != nil {
+	//		log.Debugf("--> [INIT] err: %v", err)
+	//		//return trace.Wrap(err)
+	//	} else {
+	//		os.Exit(code)
+	//	}
+	//}
 
 	cf := CLIConf{
 		Context:         ctx,
@@ -1867,26 +1866,26 @@ func onLogin(cf *CLIConf) error {
 	//	os.Exit(code)
 	//}
 
-	// If user is not logged in.
-	if profile == nil {
-		fmt.Printf("--> [LOGIN]: Update binary here.\n")
-		toolsVersion, reexec := update.Check()
-		if reexec {
-			// Download the version of client tools required by the cluster.
-			// Download may be a NOP if tools is already downloaded.
-			if err := update.Download(toolsVersion); err != nil {
-				return trace.Wrap(err)
-			}
+	//// If user is not logged in.
+	//if profile == nil {
+	//	fmt.Printf("--> [LOGIN]: Update binary here.\n")
+	//	toolsVersion, reexec := update.Check()
+	//	if reexec {
+	//		// Download the version of client tools required by the cluster.
+	//		// Download may be a NOP if tools is already downloaded.
+	//		if err := update.Download(toolsVersion); err != nil {
+	//			return trace.Wrap(err)
+	//		}
 
-			// Re-execute client tools with the correct version of client tools.
-			fmt.Printf("--> [LOGIN]: Re-exec %v.\n", toolsVersion)
-			code, err := update.Exec()
-			if err != nil {
-				return trace.Wrap(err)
-			}
-			os.Exit(code)
-		}
-	}
+	//		// Re-execute client tools with the correct version of client tools.
+	//		fmt.Printf("--> [LOGIN]: Re-exec %v.\n", toolsVersion)
+	//		code, err := update.Exec()
+	//		if err != nil {
+	//			return trace.Wrap(err)
+	//		}
+	//		os.Exit(code)
+	//	}
+	//}
 
 	//toolsVersion, reexec := update.check()
 	//if reexec {
