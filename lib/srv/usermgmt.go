@@ -96,6 +96,8 @@ type HostUsersBackend interface {
 	LookupGroup(group string) (*user.Group, error)
 	// LookupGroupByID retrieves a group by its ID.
 	LookupGroupByID(gid string) (*user.Group, error)
+	// SetUserGroups sets a user's groups, replacing their existing groups.
+	SetUserGroups(name string, groups []string) error
 	// CreateGroup creates a group on a host.
 	CreateGroup(group string, gid string) error
 	// CreateUser creates a user on a host.
@@ -227,54 +229,6 @@ func (u *HostUserManagement) CreateUser(name string, ui *services.HostUsersInfo)
 		return nil, trace.BadParameter("Mode is a required argument to CreateUser")
 	}
 
-	tempUser, err := u.backend.Lookup(name)
-	if err != nil && !errors.Is(err, user.UnknownUserError(name)) {
-		return nil, trace.Wrap(err)
-	}
-
-	if tempUser != nil {
-		gids, err := u.backend.UserGIDs(tempUser)
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-		systemGroup, err := u.backend.LookupGroup(types.TeleportServiceGroup)
-		if err != nil {
-			if isUnknownGroupError(err, types.TeleportServiceGroup) {
-				return nil, trace.AlreadyExists("User %q already exists, however no users are currently managed by teleport", name)
-			}
-			return nil, trace.Wrap(err)
-		}
-		var found bool
-		for _, gid := range gids {
-			if gid == systemGroup.Gid {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return nil, trace.AlreadyExists("User %q already exists and is not managed by teleport", name)
-		}
-
-		err = u.doWithUserLock(func(_ types.SemaphoreLease) error {
-			if err := u.storage.UpsertHostUserInteractionTime(u.ctx, name, time.Now()); err != nil {
-				return trace.Wrap(err)
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-		// try to delete even if the user already exists as only users
-		// in the teleport-system group will be deleted and this way
-		// if a user creates multiple sessions the account will
-		// succeed in deletion
-		return &userCloser{
-			username: name,
-			users:    u,
-			backend:  u.backend,
-		}, trace.AlreadyExists("User %q already exists", name)
-	}
-
 	groups := make([]string, 0, len(ui.Groups))
 	for _, group := range ui.Groups {
 		if group == name {
@@ -296,6 +250,79 @@ func (u *HostUserManagement) CreateUser(name string, ui *services.HostUsersInfo)
 	}
 	if err := trace.NewAggregate(errs...); err != nil {
 		return nil, trace.WrapWithMessage(err, "error while creating groups")
+	}
+
+	tempUser, err := u.backend.Lookup(name)
+	if err != nil && !errors.Is(err, user.UnknownUserError(name)) {
+		return nil, trace.Wrap(err)
+	}
+
+	if tempUser != nil {
+		if err := u.backend.SetUserGroups(name, groups); err != nil {
+			return nil, trace.Wrap(err)
+		}
+		gids, err := u.backend.UserGIDs(tempUser)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+
+		// Collect actions that need to be done together under a lock on the user.
+		actionsUnderLock := []func() error{
+			func() error {
+				// If the user exists, set user groups again as they might have changed.
+				return trace.Wrap(u.backend.SetUserGroups(name, groups))
+			},
+		}
+		doWithUserLock := func() error {
+			return trace.Wrap(u.doWithUserLock(func(_ types.SemaphoreLease) error {
+				for _, action := range actionsUnderLock {
+					if err := action(); err != nil {
+						return trace.Wrap(err)
+					}
+				}
+				return nil
+			}))
+		}
+
+		systemGroup, err := u.backend.LookupGroup(types.TeleportServiceGroup)
+		if err != nil {
+			if isUnknownGroupError(err, types.TeleportServiceGroup) {
+				if err := doWithUserLock(); err != nil {
+					return nil, trace.Wrap(err)
+				}
+				return nil, trace.AlreadyExists("User %q already exists, however no users are currently managed by teleport", name)
+			}
+			return nil, trace.Wrap(err)
+		}
+		var found bool
+		for _, gid := range gids {
+			if gid == systemGroup.Gid {
+				found = true
+				break
+			}
+		}
+		if !found {
+			if err := doWithUserLock(); err != nil {
+				return nil, trace.Wrap(err)
+			}
+			return nil, trace.AlreadyExists("User %q already exists and is not managed by teleport", name)
+		}
+
+		actionsUnderLock = append(actionsUnderLock, func() error {
+			return trace.Wrap(u.storage.UpsertHostUserInteractionTime(u.ctx, name, time.Now()))
+		})
+		if err := doWithUserLock(); err != nil {
+			return nil, trace.Wrap(err)
+		}
+		// try to delete even if the user already exists as only users
+		// in the teleport-system group will be deleted and this way
+		// if a user creates multiple sessions the account will
+		// succeed in deletion
+		return &userCloser{
+			username: name,
+			users:    u,
+			backend:  u.backend,
+		}, trace.AlreadyExists("User %q already exists", name)
 	}
 
 	err = u.doWithUserLock(func(_ types.SemaphoreLease) error {
@@ -333,7 +360,7 @@ func (u *HostUserManagement) CreateUser(name string, ui *services.HostUsersInfo)
 	}
 
 	if ui.Mode == types.CreateHostUserMode_HOST_USER_MODE_KEEP {
-		return nil, trace.Wrap(err)
+		return nil, nil
 	}
 
 	closer := &userCloser{

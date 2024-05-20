@@ -89,6 +89,14 @@ func (tm *testHostUserBackend) LookupGroupByID(gid string) (*user.Group, error) 
 	}, nil
 }
 
+func (tm *testHostUserBackend) SetUserGroups(name string, groups []string) error {
+	if _, ok := tm.users[name]; !ok {
+		return trace.NotFound("User %q doesn't exist", name)
+	}
+	tm.users[name] = groups
+	return nil
+}
+
 func (tm *testHostUserBackend) UserGIDs(u *user.User) ([]string, error) {
 	ids := make([]string, 0, len(tm.users[u.Username]))
 	for _, id := range tm.users[u.Username] {

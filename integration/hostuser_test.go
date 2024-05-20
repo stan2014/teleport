@@ -28,6 +28,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/gravitational/trace"
@@ -168,7 +169,7 @@ func TestRootHostUsersBackend(t *testing.T) {
 	})
 }
 
-func requireUserInGroups(t *testing.T, u *user.User, requiredGroups []string) {
+func getUserGroups(t *testing.T, u *user.User) []string {
 	var userGroups []string
 	userGids, err := u.GroupIds()
 	require.NoError(t, err)
@@ -177,7 +178,11 @@ func requireUserInGroups(t *testing.T, u *user.User, requiredGroups []string) {
 		require.NoError(t, err)
 		userGroups = append(userGroups, group.Name)
 	}
-	require.Subset(t, userGroups, requiredGroups)
+	return userGroups
+}
+
+func requireUserInGroups(t *testing.T, u *user.User, requiredGroups []string) {
+	require.Subset(t, getUserGroups(t, u), requiredGroups)
 }
 
 func cleanupUsersAndGroups(users []string, groups []string) func() {
@@ -327,6 +332,68 @@ func TestRootHostUsers(t *testing.T) {
 		for _, us := range deleteableUsers {
 			_, err := user.Lookup(us)
 			require.Equal(t, err, user.UnknownUserError(us))
+		}
+	})
+
+	t.Run("test update changed groups", func(t *testing.T) {
+		tests := []struct {
+			name         string
+			firstGroups  []string
+			secondGroups []string
+		}{
+			{
+				name:         "add groups",
+				secondGroups: []string{"group1", "group2"},
+			},
+			{
+				name:        "delete groups",
+				firstGroups: []string{"group1", "group2"},
+			},
+			{
+				name:         "change groups",
+				firstGroups:  []string{"group1", "group2"},
+				secondGroups: []string{"group2", "group3"},
+			},
+			{
+				name:         "no change",
+				firstGroups:  []string{"group1", "group2"},
+				secondGroups: []string{"group2", "group1"},
+			},
+		}
+
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Cleanup(cleanupUsersAndGroups([]string{testuser}, slices.Concat(tc.firstGroups, tc.secondGroups)))
+
+				// Verify that the user is created with the first set of groups.
+				users := srv.NewHostUsers(context.Background(), presence, "host_uuid")
+				_, err := users.CreateUser(testuser, &services.HostUsersInfo{
+					Groups: tc.firstGroups,
+					Mode:   types.CreateHostUserMode_HOST_USER_MODE_KEEP,
+				})
+				require.NoError(t, err)
+				u, err := user.Lookup(testuser)
+				require.NoError(t, err)
+				requireUserInGroups(t, u, tc.firstGroups)
+
+				// Verify that the user is updated with the second set of groups.
+				_, err = users.CreateUser(testuser, &services.HostUsersInfo{
+					Groups: tc.secondGroups,
+					Mode:   types.CreateHostUserMode_HOST_USER_MODE_KEEP,
+				})
+				require.True(t, trace.IsAlreadyExists(err), "want already exists err, got: %v", err)
+				u, err = user.Lookup(testuser)
+				require.NoError(t, err)
+				requireUserInGroups(t, u, tc.secondGroups)
+
+				// Verify that the appropriate groups form the first set were deleted.
+				userGroups := getUserGroups(t, u)
+				for _, group := range tc.firstGroups {
+					if !slices.Contains(tc.secondGroups, group) {
+						require.NotContains(t, userGroups, group)
+					}
+				}
+			})
 		}
 	})
 }
