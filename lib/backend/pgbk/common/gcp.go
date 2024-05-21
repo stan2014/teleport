@@ -25,8 +25,8 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/gravitational/trace"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/impersonate"
@@ -34,45 +34,36 @@ import (
 	gcputils "github.com/gravitational/teleport/lib/utils/gcp"
 )
 
-// ConfigurePoolConfigForGCPCloudSQL configures the provide poolConfig to use
+// ConfigureConnectionForGCPCloudSQL configures the provide poolConfig to use
 // cloudsqlconn for "automatic" IAM database authentication.
 //
-// https://cloud.google.com/sql/docs/mysql/iam-authentication
-func ConfigurePoolConfigForGCPCloudSQL(ctx context.Context, logger *slog.Logger, poolConfig *pgxpool.Config) error {
-	if poolConfig == nil || poolConfig.ConnConfig == nil {
-		return trace.BadParameter("missing pool config")
+// https://cloud.google.com/sql/docs/postgres/iam-authentication
+func ConfigureConnectionForGCPCloudSQL(ctx context.Context, logger *slog.Logger, connConfig *pgx.ConnConfig) error {
+	if connConfig == nil {
+		return trace.BadParameter("missing connection config")
 	}
 
-	gcpConfig, err := gcpConfigFromPoolConfig(poolConfig)
+	gcpConfig, err := gcpConfigFromConnConfig(connConfig)
 	if err != nil {
-		return trace.Wrap(err, "invalid postgresql url %s", poolConfig.ConnString())
+		return trace.Wrap(err, "invalid postgresql url %s", connConfig.ConnString())
 	}
 
 	dialFunc, err := makeGCPCloudSQLDialFunc(ctx, gcpConfig, logger)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	poolConfig.ConnConfig.DialFunc = dialFunc
 
-	// The cloudsqlconn "automatic" IAM auth uses a TLS client cert so password
-	// here can be anything except empty string.
-	poolConfig.ConnConfig.Password = poolConfig.ConnConfig.User
-
-	// The dialer will resolve the IP from GCP connection name. The
-	// poolConfig.Host is bogous so don't resolve it.
-	poolConfig.ConnConfig.LookupFunc = func(_ context.Context, host string) ([]string, error) {
-		return []string{host}, nil
-	}
+	connConfig.DialFunc = dialFunc
 	return nil
 }
 
 func makeGCPCloudSQLDialFunc(ctx context.Context, config *gcpConfig, logger *slog.Logger) (pgconn.DialFunc, error) {
-	iamAuthOption, err := makeGCPCloudSQLAuthOptionForServiceAccount(ctx, config.serviceAccount, gcpServiceAccountImpersonatorImpl{}, logger)
+	iamAuthOptions, err := makeGCPCloudSQLAuthOptionsForServiceAccount(ctx, config.serviceAccount, gcpServiceAccountImpersonatorImpl{}, logger)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	dialer, err := cloudsqlconn.NewDialer(ctx, iamAuthOption)
+	dialer, err := cloudsqlconn.NewDialer(ctx, iamAuthOptions...)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -90,7 +81,7 @@ func makeGCPCloudSQLDialFunc(ctx context.Context, config *gcpConfig, logger *slo
 	}, nil
 }
 
-func makeGCPCloudSQLAuthOptionForServiceAccount(ctx context.Context, targetServiceAccount string, impersonator gcpServiceAccountImpersonator, logger *slog.Logger) (cloudsqlconn.Option, error) {
+func makeGCPCloudSQLAuthOptionsForServiceAccount(ctx context.Context, targetServiceAccount string, impersonator gcpServiceAccountImpersonator, logger *slog.Logger) ([]cloudsqlconn.Option, error) {
 	defaultCred, err := google.FindDefaultCredentials(ctx)
 	if err != nil {
 		// google.FindDefaultCredentials gives pretty error descriptions already.
@@ -102,7 +93,7 @@ func makeGCPCloudSQLAuthOptionForServiceAccount(ctx context.Context, targetServi
 	defaultServiceAccount, err := gcputils.GetServiceAccountFromCredentials(defaultCred)
 	if err != nil || defaultServiceAccount == "" {
 		logger.WarnContext(ctx, "Failed to get service account email from default google credentials. Teleport will assume the database user in the PostgreSQL connection string matches the service account of the default google credentials.", "err", err, "sa", defaultServiceAccount)
-		return cloudsqlconn.WithIAMAuthN(), nil
+		return []cloudsqlconn.Option{cloudsqlconn.WithIAMAuthN()}, nil
 	}
 
 	// If the requested db user is for another service account, the default
@@ -110,12 +101,15 @@ func makeGCPCloudSQLAuthOptionForServiceAccount(ctx context.Context, targetServi
 	// Creator. This is useful when using a different database user for change
 	// feed. Otherwise, let cloudsqlconn use the default credentials.
 	if defaultServiceAccount == targetServiceAccount {
-		return cloudsqlconn.WithIAMAuthN(), nil
+		logger.InfoContext(ctx, "Using google default credentials for Cloud SQL backend.")
+		return []cloudsqlconn.Option{cloudsqlconn.WithIAMAuthN()}, nil
 	}
 
 	// For simplicity, we assume the target service account will be used for
 	// both API and IAM auth. See description of
 	// cloudsqlconn.WithIAMAuthNTokenSources on the required scopes.
+	logger.InfoContext(ctx, "Impersonating a service account for Cloud SQL backend.", "service_account", targetServiceAccount)
+
 	apiTokenSource, err := impersonator.makeTokenSource(ctx, targetServiceAccount, "https://www.googleapis.com/auth/sqlservice.admin")
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -124,7 +118,11 @@ func makeGCPCloudSQLAuthOptionForServiceAccount(ctx context.Context, targetServi
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	return cloudsqlconn.WithIAMAuthNTokenSources(apiTokenSource, iamAuthTokenSource), nil
+
+	return []cloudsqlconn.Option{
+		cloudsqlconn.WithIAMAuthN(),
+		cloudsqlconn.WithIAMAuthNTokenSources(apiTokenSource, iamAuthTokenSource),
+	}, nil
 }
 
 type gcpServiceAccountImpersonator interface {

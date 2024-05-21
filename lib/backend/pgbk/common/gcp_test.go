@@ -19,13 +19,62 @@
 package pgcommon
 
 import (
+	"context"
+	"log/slog"
 	"os"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/oauth2"
 )
+
+type mockGCPServiceAccountImpersonator struct {
+	calledForServiceAccount []string
+}
+
+func (m *mockGCPServiceAccountImpersonator) makeTokenSource(_ context.Context, serviceAccount string, _ ...string) (oauth2.TokenSource, error) {
+	m.calledForServiceAccount = append(m.calledForServiceAccount, serviceAccount)
+	return oauth2.StaticTokenSource(&oauth2.Token{
+		AccessToken: "access_token",
+		Expiry:      time.Now().Add(time.Hour),
+	}), nil
+}
+
+func Test_makeGCPCloudSQLAuthOptionsForServiceAccount(t *testing.T) {
+	mustSetGoogleApplicationCredentialsEnv(t)
+	ctx := context.Background()
+	logger := slog.Default()
+	m := &mockGCPServiceAccountImpersonator{}
+
+	t.Run("using default credentials", func(t *testing.T) {
+		defaultServiceAccount := "my-service-account@teleport-example-123456.iam.gserviceaccount.com"
+		options, err := makeGCPCloudSQLAuthOptionsForServiceAccount(ctx, defaultServiceAccount, m, logger)
+		require.NoError(t, err)
+
+		// Cannot validate the actual options. Just check that the count of
+		// options is correct and impersonator is NOT called.
+		require.Len(t, options, 1)
+		require.Empty(t, m.calledForServiceAccount)
+	})
+
+	t.Run("impersonate a service account", func(t *testing.T) {
+		otherServiceAccount := "my-other-service-account@teleport-example-123456.iam"
+		options, err := makeGCPCloudSQLAuthOptionsForServiceAccount(ctx, otherServiceAccount, m, logger)
+		require.NoError(t, err)
+
+		// Cannot validate the actual options. Just check that the count of
+		// options is correct and impersonator is called twice (once for API
+		// client and once for IAM auth).
+		require.Len(t, options, 2)
+		require.Equal(t,
+			[]string{otherServiceAccount, otherServiceAccount},
+			m.calledForServiceAccount,
+		)
+	})
+}
 
 func mustSetGoogleApplicationCredentialsEnv(t *testing.T) {
 	t.Helper()

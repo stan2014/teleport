@@ -80,7 +80,7 @@ func (a AuthMode) ApplyToPoolConfigs(ctx context.Context, logger *slog.Logger, c
 
 	case GCPCloudSQLIAMAuth:
 		for _, config := range configs {
-			if err := ConfigurePoolConfigForGCPCloudSQL(ctx, logger, config); err != nil {
+			if err := ConfigureConnectionForGCPCloudSQL(ctx, logger, config.ConnConfig); err != nil {
 				return trace.Wrap(err)
 			}
 		}

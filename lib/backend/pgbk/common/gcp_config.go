@@ -25,7 +25,7 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/gravitational/trace"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
 
 	apiutils "github.com/gravitational/teleport/api/utils"
 	gcputils "github.com/gravitational/teleport/lib/utils/gcp"
@@ -52,7 +52,7 @@ func (c *gcpConfig) check() error {
 		return trace.Wrap(err)
 	}
 	if err := gcputils.ValidateGCPServiceAccountName(c.serviceAccount); err != nil {
-		return trace.Wrap(err)
+		return trace.Wrap(err, "IAM database user for service account should have usernames in format of <service_account_name>@<project_id>.iam")
 	}
 	return nil
 }
@@ -62,9 +62,9 @@ const (
 	gcpIPTypeParam         = "gcp_ip_type"
 )
 
-func gcpConfigFromPoolConfig(poolConfig *pgxpool.Config) (*gcpConfig, error) {
+func gcpConfigFromConnConfig(connConfig *pgx.ConnConfig) (*gcpConfig, error) {
 	// TODO(greedy52) maybe support DSN format?
-	connStringURL, err := url.Parse(poolConfig.ConnString())
+	connStringURL, err := url.Parse(connConfig.ConnString())
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -77,21 +77,15 @@ func gcpConfigFromPoolConfig(poolConfig *pgxpool.Config) (*gcpConfig, error) {
 	config := &gcpConfig{
 		connectionName: params.Get(gcpConnectionNameParam),
 		ipType:         gcpIPType(strings.ToLower(params.Get(gcpIPTypeParam))),
-		serviceAccount: gcpServiceAccountFromPoolConfig(poolConfig),
+		// IAM auth users have the PostgreSQL username of their emails minus
+		// the ".gserviceaccount.com" part. Now add the suffix back for the
+		// full service account email.
+		serviceAccount: connConfig.User + ".gserviceaccount.com",
 	}
 	if err := config.check(); err != nil {
 		return nil, trace.Wrap(err)
 	}
 	return config, nil
-}
-
-// gcpServiceAccountFromPoolConfig returns the mapped service account based on
-// database username.
-func gcpServiceAccountFromPoolConfig(config *pgxpool.Config) string {
-	// IAM auth users have the PostgreSQL username of their emails minus the
-	// ".gserviceaccount.com" part. Now add the suffix back for the full
-	// service account email.
-	return config.ConnConfig.User + ".gserviceaccount.com"
 }
 
 // gcpIPType specifies the type of IP used for GCP connection.
