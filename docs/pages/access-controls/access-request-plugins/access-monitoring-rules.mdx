@@ -12,8 +12,8 @@ Currently only the Slack access plugin is supported.
 
 - A Teleport Enterprise Cloud account.
 
-- The Enterprise `tctl` admin tool and `tsh` client tool version >= (=teleport.version=). 
-  
+- The Enterprise `tctl` admin tool and `tsh` client tool version >= (=teleport.version=).
+
   You can verify the tools you have installed by running the following commands:
 
   ```code
@@ -31,7 +31,7 @@ Currently only the Slack access plugin is supported.
 
 - (!docs/pages/includes/tctl.mdx!)
 
-## Step 1/??. Creating an Access Monitoring Rule.
+## Step 1/2. Creating an Access Monitoring Rule.
 
 ```
 kind: access_monitoring_rule
@@ -61,3 +61,17 @@ Fields of the access request that are currently supported are
 - access_request.spec.request_reason: The request reason.
 - access_request.spec.creation_time: The creation time of the request.
 - access_request.spec.expiry: The expiry time of the request.
+
+Predicate expressions used in the condition of Access Monitoring Rules must evaluate to
+either true or false.
+
+## Step 2/2. Testing your new Access Monitoring Rule.
+
+In the above example rule for the Slack plugin.
+- Replace the role "your_role_name" with a role of your choice.
+- Replace "your_slack_channel" with a slack channel your plugin has access to.
+- Create the rule using `tctl create your_rule_files_path.yaml`
+
+Afterwards create an access request for the role you specified in the rule.
+
+(!docs/pages/includes/plugins/create-request.mdx!)
