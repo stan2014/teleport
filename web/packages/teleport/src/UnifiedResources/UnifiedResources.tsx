@@ -28,6 +28,7 @@ import {
   UnifiedResourcesPinning,
   BulkAction,
   IncludedResourceMode,
+  AvailabilityFilterOptions,
 } from 'shared/components/UnifiedResources';
 import { ClusterDropdown } from 'shared/components/ClusterDropdown/ClusterDropdown';
 
@@ -64,6 +65,7 @@ export function UnifiedResources() {
         key={clusterId} // when the current cluster changes, remount the component
         clusterId={clusterId}
         isLeafCluster={isLeafCluster}
+        availabilityFilterOptions={{ hidden: true, defaultMode: 'accessible' }}
       />
     </FeatureBox>
   );
@@ -100,6 +102,7 @@ export function ClusterResources({
   getActionButton,
   includeRequestable,
   showCheckout = false,
+  availabilityFilterOptions,
   bulkActions = [],
 }: {
   clusterId: string;
@@ -112,6 +115,7 @@ export function ClusterResources({
   showCheckout?: boolean;
   /** A list of actions that can be performed on the selected items. */
   bulkActions?: BulkAction[];
+  availabilityFilterOptions?: AvailabilityFilterOptions;
 }) {
   const teleCtx = useTeleport();
   const flags = teleCtx.getFeatureFlags();
@@ -128,13 +132,19 @@ export function ClusterResources({
   const canCreate = teleCtx.storeUser.getTokenAccess().create;
   const [loadClusterError, setLoadClusterError] = useState('');
 
+  const getDefaultIncludedResources = (): IncludedResourceMode => {
+    if (cfg.ui.showResources !== 'requestable') {
+      return 'accessible';
+    }
+    return availabilityFilterOptions?.defaultMode || 'all';
+  };
+
   const { params, setParams, replaceHistory, pathname } = useUrlFiltering({
     sort: {
       fieldName: 'name',
       dir: 'ASC',
     },
-    includedResources:
-      cfg.ui.showResources === 'requestable' ? 'all' : 'accessible',
+    includedResources: getDefaultIncludedResources(),
     pinnedOnly:
       preferences?.unifiedResourcePreferences?.defaultTab === DefaultTab.PINNED,
   });
@@ -221,6 +231,7 @@ export function ClusterResources({
         params={params}
         fetchResources={fetch}
         resourcesFetchAttempt={attempt}
+        availabilityFilterOptions={availabilityFilterOptions}
         unifiedResourcePreferences={preferences.unifiedResourcePreferences}
         updateUnifiedResourcesPreferences={preferences => {
           updatePreferences({ unifiedResourcePreferences: preferences });
