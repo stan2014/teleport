@@ -27,6 +27,7 @@ import {
   useUnifiedResourcesFetch,
   UnifiedResourcesPinning,
   BulkAction,
+  IncludedResourceMode,
 } from 'shared/components/UnifiedResources';
 import { ClusterDropdown } from 'shared/components/ClusterDropdown/ClusterDropdown';
 
@@ -42,6 +43,7 @@ import {
   FeatureHeaderTitle,
   FeatureBox,
 } from 'teleport/components/Layout';
+import cfg from 'teleport/config';
 import { useNoMinWidth } from 'teleport/Main';
 import AgentButtonAdd from 'teleport/components/AgentButtonAdd';
 import { SearchResource } from 'teleport/Discover/SelectResource';
@@ -102,7 +104,10 @@ export function ClusterResources({
 }: {
   clusterId: string;
   isLeafCluster: boolean;
-  getActionButton?: (resource: UnifiedResource) => JSX.Element;
+  getActionButton?: (
+    resource: UnifiedResource,
+    includedResourceMode: IncludedResourceMode
+  ) => JSX.Element;
   includeRequestable?: boolean;
   showCheckout?: boolean;
   /** A list of actions that can be performed on the selected items. */
@@ -128,6 +133,8 @@ export function ClusterResources({
       fieldName: 'name',
       dir: 'ASC',
     },
+    includedResources:
+      cfg.ui.showResources === 'requestable' ? 'all' : 'accessible',
     pinnedOnly:
       preferences?.unifiedResourcePreferences?.defaultTab === DefaultTab.PINNED,
   });
@@ -161,7 +168,7 @@ export function ClusterResources({
             searchAsRoles: '',
             limit: paginationParams.limit,
             startKey: paginationParams.startKey,
-            includeRequestable,
+            includedResources: params.includedResources,
           },
           signal
         );
@@ -179,6 +186,7 @@ export function ClusterResources({
         params.query,
         params.search,
         params.sort,
+        params.includedResources,
         teleCtx.resourceService,
         includeRequestable,
       ]
@@ -236,9 +244,10 @@ export function ClusterResources({
         resources={resources.map(resource => ({
           resource,
           ui: {
-            ActionButton: getActionButton?.(resource) || (
-              <ResourceActionButton resource={resource} />
-            ),
+            ActionButton: getActionButton?.(
+              resource,
+              params.includedResources
+            ) || <ResourceActionButton resource={resource} />,
           },
         }))}
         setParams={newParams => {

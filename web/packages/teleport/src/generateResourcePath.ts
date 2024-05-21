@@ -50,7 +50,7 @@ export default function generateResourcePath(
     .replace(':sort?', processedParams.sort || '')
     .replace(':kinds?', processedParams.kinds || '')
     .replace(':pinnedOnly?', processedParams.pinnedOnly || '')
-    .replace(':includeRequestable?', processedParams.includeRequestable || '');
+    .replace(':includedResources?', processedParams.includedResources || '');
 
   return output;
 }

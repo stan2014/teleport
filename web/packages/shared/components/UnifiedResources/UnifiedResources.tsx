@@ -69,6 +69,7 @@ import {
   PinningSupport,
   UnifiedResourcesPinning,
   UnifiedResourcesQueryParams,
+  IncludedResourceMode,
 } from './types';
 
 import { ResourceTab } from './ResourceTab';
@@ -131,6 +132,12 @@ export type FilterKind = {
   disabled: boolean;
 };
 
+export type AvailabilityFilterOptions = {
+  defaultMode?: IncludedResourceMode;
+  // if hidden is true, the filter will not be displayed
+  hidden?: boolean;
+};
+
 export interface UnifiedResourcesProps {
   params: UnifiedResourcesQueryParams;
   resourcesFetchAttempt: Attempt;
@@ -164,6 +171,7 @@ export interface UnifiedResourcesProps {
    * while the unified resources component is visible.
    */
   unifiedResourcePreferencesAttempt?: AsyncAttempt<void>;
+  availabilityFilterOptions?: AvailabilityFilterOptions;
   unifiedResourcePreferences: UnifiedResourcePreferences;
   updateUnifiedResourcesPreferences(
     preferences: UnifiedResourcePreferences
@@ -177,6 +185,7 @@ export function UnifiedResources(props: UnifiedResourcesProps) {
     resourcesFetchAttempt,
     resources,
     fetchResources,
+    availabilityFilterOptions,
     availableKinds,
     pinning,
     unifiedResourcePreferencesAttempt,
@@ -447,6 +456,7 @@ export function UnifiedResources(props: UnifiedResourcesProps) {
 
       {props.Header}
       <FilterPanel
+        availabilityFilterOptions={availabilityFilterOptions}
         params={params}
         setParams={setParams}
         availableKinds={availableKinds}
@@ -554,9 +564,19 @@ export function UnifiedResources(props: UnifiedResourcesProps) {
               // and a loading indicator if needed.
               !unifiedResourcePreferencesAttempt ||
               hasFinished(unifiedResourcePreferencesAttempt)
-                ? resources.map(unifiedResource => ({
-                    item: mapResourceToViewItem(unifiedResource),
-                    key: generateUnifiedResourceKey(unifiedResource.resource),
+                ? resources.map(({ ui, resource }) => ({
+                    item: mapResourceToViewItem({
+                      ui,
+                      resource: {
+                        ...resource,
+                        // if we are in 'requestable' only mode, then all resources returned
+                        // require a request and should be displayed that way
+                        requiresRequest:
+                          resource.requiresRequest ||
+                          params.includedResources === 'requestable',
+                      },
+                    }),
+                    key: generateUnifiedResourceKey(resource),
                   }))
                 : []
             }

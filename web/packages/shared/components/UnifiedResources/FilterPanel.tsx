@@ -32,13 +32,18 @@ import {
   ArrowsIn,
   ArrowsOut,
 } from 'design/Icon';
+import cfg from 'teleport/config';
 
 import { ViewMode } from 'gen-proto-ts/teleport/userpreferences/v1/unified_resource_preferences_pb';
 
 import { HoverTooltip } from 'shared/components/ToolTip';
 
-import { FilterKind } from './UnifiedResources';
-import { SharedUnifiedResource, UnifiedResourcesQueryParams } from './types';
+import { AvailabilityFilterOptions, FilterKind } from './UnifiedResources';
+import {
+  IncludedResourceMode,
+  SharedUnifiedResource,
+  UnifiedResourcesQueryParams,
+} from './types';
 
 const kindToLabel: Record<SharedUnifiedResource['resource']['kind'], string> = {
   app: 'Application',
@@ -71,6 +76,7 @@ interface FilterPanelProps {
    * FilterPanel component. This is useful to turn off in Connect and use on web only
    */
   ClusterDropdown?: JSX.Element;
+  availabilityFilterOptions?: AvailabilityFilterOptions;
 }
 
 export function FilterPanel({
@@ -82,6 +88,7 @@ export function FilterPanel({
   BulkActions,
   currentViewMode,
   setCurrentViewMode,
+  availabilityFilterOptions,
   expandAllLabels,
   setExpandAllLabels,
   hideViewModeOptions,
@@ -105,6 +112,15 @@ export function FilterPanel({
     setParams({ ...params, sort: oppositeSort(sort) });
   };
 
+  const onIncludedResourcesChange = (
+    includedResources: IncludedResourceMode
+  ) => {
+    setParams({
+      ...params,
+      includedResources,
+    });
+  };
+
   return (
     // minHeight is set to 32px so there isn't layout shift when a bulk action button shows up
     <Flex
@@ -116,6 +132,10 @@ export function FilterPanel({
       <Flex gap={2}>
         <HoverTooltip tipContent={selected ? 'Deselect all' : 'Select all'}>
           <StyledCheckbox
+            css={`
+              // add extra margin so it aligns with the checkboxes of the resources
+              margin-left: 20px;
+            `}
             checked={selected}
             onChange={selectVisible}
             data-testid="select_all"
@@ -128,6 +148,14 @@ export function FilterPanel({
           kindsFromParams={kinds || []}
         />
         {ClusterDropdown}
+        {!availabilityFilterOptions?.hidden && (
+          <IncludedResourcesSelector
+            includedResourceMode={
+              availabilityFilterOptions?.defaultMode || params.includedResources
+            }
+            onChange={onIncludedResourcesChange}
+          />
+        )}
       </Flex>
       <Flex gap={2} alignItems="center">
         <Flex mr={1}>{BulkActions}</Flex>
@@ -248,7 +276,7 @@ const FilterTypesMenu = ({
 
   return (
     <Flex textAlign="center" alignItems="center">
-      <HoverTooltip tipContent={'Filter types'}>
+      <HoverTooltip tipContent={'Filter by resource type'}>
         <ButtonSecondary
           px={2}
           css={`
@@ -493,6 +521,152 @@ function ViewModeSwitch({
     </ViewModeSwitchContainer>
   );
 }
+
+export const IncludedResourcesSelector = ({
+  onChange,
+  includedResourceMode,
+}: {
+  onChange: (value: IncludedResourceMode) => void;
+  includedResourceMode: IncludedResourceMode;
+}) => {
+  const options: { value: IncludedResourceMode; label: string }[] = [
+    {
+      value: 'accessible',
+      label: 'Accessible',
+    },
+    {
+      value: 'requestable',
+      label: 'Requestable',
+    },
+  ];
+
+  const [availability, setAvailability] = useState<IncludedResourceMode[]>(
+    includedResourceMode === 'all'
+      ? ['requestable', 'accessible']
+      : [includedResourceMode]
+  );
+
+  const [anchorEl, setAnchorEl] = useState(null);
+
+  const handleOpen = event => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleClose = () => {
+    setAnchorEl(null);
+  };
+
+  const onCancel = () => {
+    if (includeRequestable && includedResourceMode === 'all') {
+      setAvailability(['accessible', 'requestable']);
+    } else {
+      setAvailability([includedResourceMode]);
+    }
+    handleClose();
+  };
+
+  const includeRequestable = cfg.ui.showResources === 'requestable';
+
+  function onChangeOption(value: IncludedResourceMode) {
+    // if we cannot include both types of resources, we can just
+    // "swap" out the options instead of appending
+    if (!includeRequestable) {
+      setAvailability([value]);
+      return;
+    }
+    let newAvailability = [...availability];
+    if (newAvailability.includes(value)) {
+      newAvailability = newAvailability.filter(v => v !== value);
+    } else {
+      newAvailability.push(value);
+    }
+    setAvailability(newAvailability);
+  }
+
+  function applyFilter() {
+    handleClose();
+    // if we only have one mode selected, we choose that as
+    // the param
+    if (availability.length === 1) {
+      onChange(availability[0]);
+      return;
+    }
+    // otherwise, "both" selected, or none selected work the same
+    // as "all"
+    onChange('all');
+  }
+
+  return (
+    <Flex textAlign="center" alignItems="center">
+      <HoverTooltip tipContent={'Filter by resource availability'}>
+        <ButtonSecondary
+          px={2}
+          css={`
+            border-color: ${props => props.theme.colors.spotBackground[0]};
+          `}
+          textTransform="none"
+          size="small"
+          onClick={handleOpen}
+        >
+          Availability
+          <ChevronDown ml={2} size="small" color="text.slightlyMuted" />
+          {includeRequestable && includedResourceMode !== 'all' && (
+            <FiltersExistIndicator />
+          )}
+        </ButtonSecondary>
+      </HoverTooltip>
+      <Menu
+        popoverCss={() => `
+          margin-top: 36px; 
+        `}
+        transformOrigin={{
+          vertical: 'top',
+          horizontal: 'left',
+        }}
+        anchorOrigin={{
+          vertical: 'bottom',
+          horizontal: 'left',
+        }}
+        anchorEl={anchorEl}
+        open={Boolean(anchorEl)}
+        onClose={handleClose}
+      >
+        {options.map(option => (
+          <MenuItem
+            key={option.value}
+            px={2}
+            onClick={() => onChangeOption(option.value)}
+          >
+            <StyledCheckbox
+              type="checkbox"
+              name={option.label}
+              id={option.value}
+              onChange={() => onChangeOption(option.value)}
+              checked={availability.includes(option.value)}
+            />
+            <Text ml={2} fontWeight={300} fontSize={2}>
+              {option.label}
+            </Text>
+          </MenuItem>
+        ))}
+        <Flex justifyContent="space-between" p={2} gap={2}>
+          <ButtonPrimary disabled={false} size="small" onClick={applyFilter}>
+            Apply Filter
+          </ButtonPrimary>
+          <ButtonSecondary
+            size="small"
+            css={`
+              background-color: transparent;
+            `}
+            onClick={onCancel}
+          >
+            Cancel
+          </ButtonSecondary>
+        </Flex>
+      </Menu>
+    </Flex>
+  );
+};
 
 const ViewModeSwitchContainer = styled.div`
   height: 22px;

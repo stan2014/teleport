@@ -257,6 +257,7 @@ const Resources = memo(
           props.updateUserPreferences({ unifiedResourcePreferences })
         }
         pinning={pinning}
+        availabilityFilterOptions={{ hidden: true, defaultMode: 'accessible' }}
         resources={resources.map(mapToSharedResource)}
         resourcesFetchAttempt={attempt}
         fetchResources={fetch}
