@@ -16,7 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import React, { useState } from 'react';
+import React, { useState, FormEvent } from 'react';
 import styled from 'styled-components';
 import { ButtonBorder, ButtonPrimary, ButtonSecondary } from 'design/Button';
 import { SortDir } from 'design/DataTable/types';
@@ -32,13 +32,12 @@ import {
   ArrowsIn,
   ArrowsOut,
 } from 'design/Icon';
-import cfg from 'teleport/config';
 
 import { ViewMode } from 'gen-proto-ts/teleport/userpreferences/v1/unified_resource_preferences_pb';
 
 import { HoverTooltip } from 'shared/components/ToolTip';
 
-import { AvailabilityFilterOptions, FilterKind } from './UnifiedResources';
+import { ResourceAvailabilityFilter, FilterKind } from './UnifiedResources';
 import {
   IncludedResourceMode,
   SharedUnifiedResource,
@@ -76,7 +75,8 @@ interface FilterPanelProps {
    * FilterPanel component. This is useful to turn off in Connect and use on web only
    */
   ClusterDropdown?: JSX.Element;
-  availabilityFilterOptions?: AvailabilityFilterOptions;
+  availabilityFilter?: ResourceAvailabilityFilter;
+  changeAvailableResourceMode(mode: IncludedResourceMode): void;
 }
 
 export function FilterPanel({
@@ -88,10 +88,11 @@ export function FilterPanel({
   BulkActions,
   currentViewMode,
   setCurrentViewMode,
-  availabilityFilterOptions,
+  availabilityFilter,
   expandAllLabels,
   setExpandAllLabels,
   hideViewModeOptions,
+  changeAvailableResourceMode,
   ClusterDropdown = null,
 }: FilterPanelProps) {
   const { sort, kinds } = params;
@@ -110,15 +111,6 @@ export function FilterPanel({
 
   const onSortOrderButtonClicked = () => {
     setParams({ ...params, sort: oppositeSort(sort) });
-  };
-
-  const onIncludedResourcesChange = (
-    includedResources: IncludedResourceMode
-  ) => {
-    setParams({
-      ...params,
-      includedResources,
-    });
   };
 
   return (
@@ -148,12 +140,10 @@ export function FilterPanel({
           kindsFromParams={kinds || []}
         />
         {ClusterDropdown}
-        {!availabilityFilterOptions?.hidden && (
+        {availabilityFilter && (
           <IncludedResourcesSelector
-            includedResourceMode={
-              availabilityFilterOptions?.defaultMode || params.includedResources
-            }
-            onChange={onIncludedResourcesChange}
+            availabilityFilter={availabilityFilter}
+            onChange={changeAvailableResourceMode}
           />
         )}
       </Flex>
@@ -522,30 +512,24 @@ function ViewModeSwitch({
   );
 }
 
-export const IncludedResourcesSelector = ({
+const options: { value: IncludedResourceMode; label: string }[] = [
+  {
+    value: 'accessible',
+    label: 'Accessible',
+  },
+  {
+    value: 'requestable',
+    label: 'Requestable',
+  },
+];
+
+const IncludedResourcesSelector = ({
   onChange,
-  includedResourceMode,
+  availabilityFilter,
 }: {
   onChange: (value: IncludedResourceMode) => void;
-  includedResourceMode: IncludedResourceMode;
+  availabilityFilter: ResourceAvailabilityFilter;
 }) => {
-  const options: { value: IncludedResourceMode; label: string }[] = [
-    {
-      value: 'accessible',
-      label: 'Accessible',
-    },
-    {
-      value: 'requestable',
-      label: 'Requestable',
-    },
-  ];
-
-  const [availability, setAvailability] = useState<IncludedResourceMode[]>(
-    includedResourceMode === 'all'
-      ? ['requestable', 'accessible']
-      : [includedResourceMode]
-  );
-
   const [anchorEl, setAnchorEl] = useState(null);
 
   const handleOpen = event => {
@@ -556,44 +540,32 @@ export const IncludedResourcesSelector = ({
     setAnchorEl(null);
   };
 
-  const onCancel = () => {
-    if (includeRequestable && includedResourceMode === 'all') {
-      setAvailability(['accessible', 'requestable']);
-    } else {
-      setAvailability([includedResourceMode]);
-    }
+  function applyFilter(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
     handleClose();
-  };
 
-  const includeRequestable = cfg.ui.showResources === 'requestable';
+    const formData = new FormData(e.currentTarget);
+    const availabilityOptionsForm = formData.getAll('availabilityOptions');
 
-  function onChangeOption(value: IncludedResourceMode) {
-    // if we cannot include both types of resources, we can just
-    // "swap" out the options instead of appending
-    if (!includeRequestable) {
-      setAvailability([value]);
-      return;
-    }
-    let newAvailability = [...availability];
-    if (newAvailability.includes(value)) {
-      newAvailability = newAvailability.filter(v => v !== value);
+    // We selected all or nothing.
+    if (
+      availabilityOptionsForm.length === 0 ||
+      availabilityOptionsForm.length === 2
+    ) {
+      onChange('all');
     } else {
-      newAvailability.push(value);
+      onChange(availabilityOptionsForm.at(0) as IncludedResourceMode);
     }
-    setAvailability(newAvailability);
   }
 
-  function applyFilter() {
-    handleClose();
-    // if we only have one mode selected, we choose that as
-    // the param
-    if (availability.length === 1) {
-      onChange(availability[0]);
-      return;
+  function isCheckboxPreSelected(option: IncludedResourceMode): boolean {
+    if (availabilityFilter.canRequestAll === true) {
+      return (
+        availabilityFilter.mode === 'all' || availabilityFilter.mode === option
+      );
     }
-    // otherwise, "both" selected, or none selected work the same
-    // as "all"
-    onChange('all');
+
+    return availabilityFilter.mode === option;
   }
 
   return (
@@ -610,9 +582,8 @@ export const IncludedResourcesSelector = ({
         >
           Availability
           <ChevronDown ml={2} size="small" color="text.slightlyMuted" />
-          {includeRequestable && includedResourceMode !== 'all' && (
-            <FiltersExistIndicator />
-          )}
+          {availabilityFilter.canRequestAll === true &&
+            availabilityFilter.mode !== 'all' && <FiltersExistIndicator />}
         </ButtonSecondary>
       </HoverTooltip>
       <Menu
@@ -631,38 +602,35 @@ export const IncludedResourcesSelector = ({
         open={Boolean(anchorEl)}
         onClose={handleClose}
       >
-        {options.map(option => (
-          <MenuItem
-            key={option.value}
-            px={2}
-            onClick={() => onChangeOption(option.value)}
-          >
-            <StyledCheckbox
-              type="checkbox"
-              name={option.label}
-              id={option.value}
-              onChange={() => onChangeOption(option.value)}
-              checked={availability.includes(option.value)}
-            />
-            <Text ml={2} fontWeight={300} fontSize={2}>
-              {option.label}
-            </Text>
-          </MenuItem>
-        ))}
-        <Flex justifyContent="space-between" p={2} gap={2}>
-          <ButtonPrimary disabled={false} size="small" onClick={applyFilter}>
-            Apply Filter
-          </ButtonPrimary>
-          <ButtonSecondary
-            size="small"
-            css={`
-              background-color: transparent;
-            `}
-            onClick={onCancel}
-          >
-            Cancel
-          </ButtonSecondary>
-        </Flex>
+        <form onSubmit={applyFilter}>
+          {options.map(option => (
+            <MenuItem as="label" key={option.value} px={2}>
+              <StyledCheckbox
+                type={availabilityFilter.canRequestAll ? 'checkbox' : 'radio'}
+                name="availabilityOptions"
+                value={option.value}
+                defaultChecked={isCheckboxPreSelected(option.value)}
+              />
+              <Text ml={2} fontWeight={300} fontSize={2}>
+                {option.label}
+              </Text>
+            </MenuItem>
+          ))}
+          <Flex justifyContent="space-between" p={2} gap={2}>
+            <ButtonPrimary disabled={false} size="small" type="submit">
+              Apply Filter
+            </ButtonPrimary>
+            <ButtonSecondary
+              size="small"
+              css={`
+                background-color: transparent;
+              `}
+              onClick={handleClose}
+            >
+              Cancel
+            </ButtonSecondary>
+          </Flex>
+        </form>
       </Menu>
     </Flex>
   );
