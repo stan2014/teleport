@@ -3115,6 +3115,11 @@ func (a *ServerWithRoles) generateUserCerts(ctx context.Context, req proto.UserC
 					Traits:         accessInfo.Traits,
 					Roles:          accessInfo.Roles,
 					AccessRequests: req.AccessRequests,
+					// App sessions created through generateUserCerts are securely contained
+					// to the Proxy and Auth roles, and thus should pass hardware key requirements
+					// through the "web_session" attestation. User's will be required to provide
+					// MFA instead.
+					AttestWebSession: true,
 				},
 				PublicAddr:        req.RouteToApp.PublicAddr,
 				ClusterName:       req.RouteToApp.ClusterName,
@@ -5411,18 +5416,16 @@ func (a *ServerWithRoles) GetSnowflakeSession(ctx context.Context, req types.Get
 // GetSAMLIdPSession gets a SAML IdP session.
 // TODO(Joerger): DELETE IN v17.0.0
 func (a *ServerWithRoles) GetSAMLIdPSession(ctx context.Context, req types.GetSAMLIdPSessionRequest) (types.WebSession, error) {
+	if err := a.action(apidefaults.Namespace, types.KindWebSession, types.VerbRead); err != nil {
+		return nil, trace.Wrap(err)
+	}
+
 	session, err := a.authServer.GetSAMLIdPSession(ctx, req)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	if session.GetSubKind() != types.KindSAMLIdPSession {
 		return nil, trace.AccessDenied("GetSAMLIdPSession only allows reading sessions with SubKind SAMLIdpSession")
-	}
-	// Users can only fetch their own web sessions or the proxy can fetch all web sessions.
-	if err := a.currentUserAction(session.GetUser()); err != nil {
-		if err := a.action(apidefaults.Namespace, types.KindWebSession, types.VerbRead); err != nil {
-			return nil, trace.Wrap(err)
-		}
 	}
 	return session, nil
 }
@@ -5500,12 +5503,10 @@ func (a *ServerWithRoles) CreateSnowflakeSession(ctx context.Context, req types.
 func (a *ServerWithRoles) CreateSAMLIdPSession(ctx context.Context, req types.CreateSAMLIdPSessionRequest) (types.WebSession, error) {
 	// Check if this a proxy service.
 	if !a.hasBuiltinRole(types.RoleProxy) {
-		if err := a.currentUserAction(req.Username); err != nil {
-			return nil, trace.Wrap(err)
-		}
+		return nil, trace.AccessDenied("this request can be only executed by a proxy")
 	}
 
-	samlSession, err := a.authServer.CreateSAMLIdPSession(ctx, req, a.context.Identity.GetIdentity(), a.context.Checker)
+	samlSession, err := a.authServer.CreateSAMLIdPSession(ctx, req)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

@@ -1,6 +1,6 @@
 /**
  * Teleport
- * Copyright (C) 2024 Gravitational, Inc.
+ * Copyright (C) 2024  Gravitational, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -16,4 +16,24 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-export { AddAuthDeviceWizard } from './AddAuthDeviceWizard';
+import { App } from 'teleport/services/apps';
+
+export const app: App = {
+  kind: 'app',
+  id: 'id',
+  name: 'Jenkins',
+  launchUrl: '',
+  awsRoles: [],
+  userGroups: [],
+  samlApp: false,
+  uri: 'https://jenkins.teleport-proxy.com',
+  publicAddr: 'jenkins.teleport-proxy.com',
+  description: 'This is a Jenkins app',
+  awsConsole: true,
+  labels: [
+    { name: 'env', value: 'prod' },
+    { name: 'cluster', value: 'one' },
+  ],
+  clusterId: 'one',
+  fqdn: 'jenkins.one',
+};

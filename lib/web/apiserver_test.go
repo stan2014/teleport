@@ -56,7 +56,6 @@ import (
 	"github.com/gravitational/trace"
 	"github.com/jonboulle/clockwork"
 	"github.com/julienschmidt/httprouter"
-	lemma_secret "github.com/mailgun/lemma/secret"
 	"github.com/mailgun/timetools"
 	"github.com/pquerna/otp/totp"
 	"github.com/sashabaranov/go-openai"
@@ -138,6 +137,7 @@ import (
 	"github.com/gravitational/teleport/lib/utils"
 	utilsaws "github.com/gravitational/teleport/lib/utils/aws"
 	websession "github.com/gravitational/teleport/lib/web/session"
+	"github.com/gravitational/teleport/lib/web/terminal"
 	"github.com/gravitational/teleport/lib/web/ui"
 )
 
@@ -1485,8 +1485,8 @@ func TestSiteNodeConnectInvalidSessionID(t *testing.T) {
 		host:      s.node.ID(),
 		proxy:     s.webServer.Listener.Addr().String(),
 		sessionID: "/../../../foo",
-		handlers: map[string]WSHandlerFunc{
-			defaults.WebsocketError: func(ctx context.Context, e Envelope) {
+		handlers: map[string]terminal.WSHandlerFunc{
+			defaults.WebsocketError: func(ctx context.Context, e terminal.Envelope) {
 				if e.Payload == "/../../../foo is not a valid UUID" {
 					result <- errors.New(e.Payload)
 				}
@@ -1571,7 +1571,7 @@ func TestResolveServerHostPort(t *testing.T) {
 	}
 }
 
-func isFileTransferRequest(e *Envelope) bool {
+func isFileTransferRequest(e *terminal.Envelope) bool {
 	if e.GetType() != defaults.WebsocketAudit {
 		return false
 	}
@@ -1582,7 +1582,7 @@ func isFileTransferRequest(e *Envelope) bool {
 	return ef.GetType() == string(srv.FileTransferUpdate)
 }
 
-func isFileTransferDecision(e *Envelope) bool {
+func isFileTransferDecision(e *terminal.Envelope) bool {
 	if e.GetType() != defaults.WebsocketAudit {
 		return false
 	}
@@ -1593,7 +1593,7 @@ func isFileTransferDecision(e *Envelope) bool {
 	return ef.GetType() == string(srv.FileTransferApproved)
 }
 
-func getRequestId(e *Envelope) (string, error) {
+func getRequestId(e *terminal.Envelope) (string, error) {
 	var ef events.EventFields
 	if err := json.Unmarshal([]byte(e.GetPayload()), &ef); err != nil {
 		return "", err
@@ -1609,13 +1609,13 @@ func TestFileTransferEvents(t *testing.T) {
 	t.Cleanup(cancel)
 
 	// Create a new user "foo", open a terminal to a new session
-	wsMessages := make(chan *Envelope)
+	wsMessages := make(chan *terminal.Envelope)
 	term, err := connectToHost(ctx, connectConfig{
 		pack:  s.authPack(t, "foo"),
 		host:  s.node.ID(),
 		proxy: s.webServer.Listener.Addr().String(),
-		handlers: map[string]WSHandlerFunc{
-			defaults.WebsocketAudit: func(ctx context.Context, envelope Envelope) {
+		handlers: map[string]terminal.WSHandlerFunc{
+			defaults.WebsocketAudit: func(ctx context.Context, envelope terminal.Envelope) {
 				wsMessages <- &envelope
 			},
 		},
@@ -1630,7 +1630,7 @@ func TestFileTransferEvents(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	envelope := &Envelope{
+	envelope := &terminal.Envelope{
 		Version: defaults.WebsocketVersion,
 		Type:    defaults.WebsocketFileTransferRequest,
 		Payload: string(data),
@@ -1654,7 +1654,7 @@ func TestFileTransferEvents(t *testing.T) {
 					"approved":  true,
 				})
 				require.NoError(t, err)
-				envelope := &Envelope{
+				envelope := &terminal.Envelope{
 					Version: defaults.WebsocketVersion,
 					Type:    defaults.WebsocketFileTransferDecision,
 					Payload: string(data),
@@ -1816,16 +1816,16 @@ func TestResizeTerminal(t *testing.T) {
 	ctx, cancel := context.WithCancel(s.ctx)
 	t.Cleanup(cancel)
 
-	ws1Messages := make(chan *Envelope)
+	ws1Messages := make(chan *terminal.Envelope)
 	ws1Raw := make(chan []byte)
-	ws2Messages := make(chan *Envelope)
+	ws2Messages := make(chan *terminal.Envelope)
 	// Create a new user "foo", open a terminal to a new session
 	term, err := connectToHost(ctx, connectConfig{
 		pack:  s.authPack(t, "foo"),
 		host:  s.node.ID(),
 		proxy: s.webServer.Listener.Addr().String(),
-		handlers: map[string]WSHandlerFunc{
-			defaults.WebsocketAudit: func(ctx context.Context, envelope Envelope) {
+		handlers: map[string]terminal.WSHandlerFunc{
+			defaults.WebsocketAudit: func(ctx context.Context, envelope terminal.Envelope) {
 				ws1Messages <- &envelope
 			},
 		},
@@ -1847,8 +1847,8 @@ func TestResizeTerminal(t *testing.T) {
 		proxy:           s.webServer.Listener.Addr().String(),
 		sessionID:       sess.ID,
 		participantMode: types.SessionPeerMode,
-		handlers: map[string]WSHandlerFunc{
-			defaults.WebsocketAudit: func(ctx context.Context, envelope Envelope) {
+		handlers: map[string]terminal.WSHandlerFunc{
+			defaults.WebsocketAudit: func(ctx context.Context, envelope terminal.Envelope) {
 				ws2Messages <- &envelope
 			},
 		},
@@ -1911,7 +1911,7 @@ t1ready:
 		events.TerminalSize:   params.Serialize(),
 	})
 	require.NoError(t, err)
-	envelope := &Envelope{
+	envelope := &terminal.Envelope{
 		Version: defaults.WebsocketVersion,
 		Type:    defaults.WebsocketResize,
 		Payload: string(data),
@@ -1935,7 +1935,7 @@ t1ready:
 	}
 }
 
-func isResizeEventEnvelope(e *Envelope) bool {
+func isResizeEventEnvelope(e *terminal.Envelope) bool {
 	if e.GetType() != defaults.WebsocketAudit {
 		return false
 	}
@@ -1962,7 +1962,7 @@ func TestTerminalPing(t *testing.T) {
 		host:              s.node.ID(),
 		proxy:             s.webServer.Listener.Addr().String(),
 		keepAliveInterval: time.Second,
-		pingHandler: func(ws WSConn, message string) error {
+		pingHandler: func(ws terminal.WSConn, message string) error {
 			if closed == false {
 				close(done)
 				closed = true
@@ -2169,7 +2169,7 @@ func TestTerminalRequireSessionMFA(t *testing.T) {
 				webauthnResBytes, err := json.Marshal(wantypes.CredentialAssertionResponseFromProto(res.GetWebauthn()))
 				require.NoError(t, err)
 
-				envelope := &Envelope{
+				envelope := &terminal.Envelope{
 					Version: defaults.WebsocketVersion,
 					Type:    defaults.WebsocketWebauthnChallenge,
 					Payload: string(webauthnResBytes),
@@ -3103,47 +3103,27 @@ func TestConstructSSHResponse(t *testing.T) {
 	require.EqualValues(t, []byte{0x01}, resp.TLSCert)
 }
 
-// TestConstructSSHResponseLegacy checks if the secret package uses NaCl to
-// encrypt and decrypt data that passes through the ConstructSSHResponse
-// function.
+// TestConstructSSHResponseLegacy checks that the old-style NaCl encryption with
+// a secret query parameter (rather than secret_key, using AES-GCM) is not
+// supported.
 func TestConstructSSHResponseLegacy(t *testing.T) {
-	key, err := lemma_secret.NewKey()
-	require.NoError(t, err)
+	u := &url.URL{
+		Scheme: "http",
+		Host:   "www.example.com",
+		Path:   "/callback",
+		RawQuery: url.Values{
+			// the old-style NaCl key is 32 bytes in base 32
+			"secret": {base64.StdEncoding.EncodeToString(make([]byte, 32))},
+		}.Encode(),
+	}
 
-	lemma, err := lemma_secret.New(&lemma_secret.Config{KeyBytes: key})
-	require.NoError(t, err)
-
-	u, err := url.Parse("http://www.example.com/callback")
-	require.NoError(t, err)
-	query := u.Query()
-	query.Set("secret", lemma_secret.KeyToEncodedString(key))
-	u.RawQuery = query.Encode()
-
-	rawresp, err := ConstructSSHResponse(AuthParams{
+	_, err := ConstructSSHResponse(AuthParams{
 		Username:          "foo",
 		Cert:              []byte{0x00},
 		TLSCert:           []byte{0x01},
 		ClientRedirectURL: u.String(),
 	})
-	require.NoError(t, err)
-
-	require.Empty(t, rawresp.Query().Get("secret"))
-	require.Empty(t, rawresp.Query().Get("secret_key"))
-	require.NotEmpty(t, rawresp.Query().Get("response"))
-
-	var sealedData *lemma_secret.SealedBytes
-	err = json.Unmarshal([]byte(rawresp.Query().Get("response")), &sealedData)
-	require.NoError(t, err)
-
-	plaintext, err := lemma.Open(sealedData)
-	require.NoError(t, err)
-
-	var resp *authclient.SSHLoginResponse
-	err = json.Unmarshal(plaintext, &resp)
-	require.NoError(t, err)
-	require.Equal(t, "foo", resp.Username)
-	require.EqualValues(t, []byte{0x00}, resp.Cert)
-	require.EqualValues(t, []byte{0x01}, resp.TLSCert)
+	require.ErrorIs(t, err, &trace.BadParameterError{Message: "missing secret_key"})
 }
 
 type byTimeAndIndex []apievents.AuditEvent
@@ -9801,7 +9781,7 @@ func TestModeratedSessionWithMFA(t *testing.T) {
 			webauthnResBytes, err := json.Marshal(wantypes.CredentialAssertionResponseFromProto(res.GetWebauthn()))
 			require.NoError(t, err)
 
-			envelope := &Envelope{
+			envelope := &terminal.Envelope{
 				Version: defaults.WebsocketVersion,
 				Type:    defaults.WebsocketWebauthnChallenge,
 				Payload: string(webauthnResBytes),
@@ -9832,7 +9812,7 @@ func TestModeratedSessionWithMFA(t *testing.T) {
 			webauthnResBytes, err := json.Marshal(wantypes.CredentialAssertionResponseFromProto(res.GetWebauthn()))
 			require.NoError(t, err)
 
-			envelope := &Envelope{
+			envelope := &terminal.Envelope{
 				Version: defaults.WebsocketVersion,
 				Type:    defaults.WebsocketWebauthnChallenge,
 				Payload: string(webauthnResBytes),
@@ -9861,7 +9841,7 @@ func TestModeratedSessionWithMFA(t *testing.T) {
 		presenceClock.Advance(30 * time.Second)
 		require.NoError(t, waitForOutput(moderatorTerm, "Teleport > Please tap your MFA key"), "waiting for moderator mfa prompt")
 
-		challenge, err := moderatorTerm.stream.readChallenge(protobufMFACodec{})
+		challenge, err := moderatorTerm.stream.ReadChallenge(protobufMFACodec{})
 		require.NoError(t, err)
 
 		res, err := moderator.device.SolveAuthn(challenge)
@@ -9870,7 +9850,7 @@ func TestModeratedSessionWithMFA(t *testing.T) {
 		webauthnResBytes, err := json.Marshal(wantypes.CredentialAssertionResponseFromProto(res.GetWebauthn()))
 		require.NoError(t, err)
 
-		envelope := &Envelope{
+		envelope := &terminal.Envelope{
 			Version: defaults.WebsocketVersion,
 			Type:    defaults.WebsocketWebauthnChallenge,
 			Payload: string(webauthnResBytes),
@@ -10299,11 +10279,11 @@ func TestWebSocketClosedBeforeSSHSessionCreated(t *testing.T) {
 	// Create a stream that closes the web socket when the server writes the session metadata
 	// to the client. At this point, the SSH connection to the target should be in flight but
 	// not yet established.
-	stream := NewTerminalStream(ctx, TerminalStreamConfig{
+	stream := terminal.NewStream(ctx, terminal.StreamConfig{
 		WS:     ws,
 		Logger: utils.NewLogger(),
-		Handlers: map[string]WSHandlerFunc{
-			defaults.WebsocketSessionMetadata: func(ctx context.Context, envelope Envelope) {
+		Handlers: map[string]terminal.WSHandlerFunc{
+			defaults.WebsocketSessionMetadata: func(ctx context.Context, envelope terminal.Envelope) {
 				if envelope.Type != defaults.WebsocketSessionMetadata {
 					return
 				}
