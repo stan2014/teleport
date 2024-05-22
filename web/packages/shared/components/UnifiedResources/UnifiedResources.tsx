@@ -47,6 +47,7 @@ import {
   LabelsViewMode,
   UnifiedResourcePreferences,
   ViewMode,
+  AvailableResourceMode,
 } from 'gen-proto-ts/teleport/userpreferences/v1/unified_resource_preferences_pb';
 
 import { HoverTooltip } from 'shared/components/ToolTip';
@@ -132,11 +133,15 @@ export type FilterKind = {
   disabled: boolean;
 };
 
-export type AvailabilityFilterOptions = {
-  defaultMode?: IncludedResourceMode;
-  // if hidden is true, the filter will not be displayed
-  hidden?: boolean;
-};
+export type ResourceAvailabilityFilter =
+  | {
+      canRequestAll: true;
+      mode: IncludedResourceMode;
+    }
+  | {
+      canRequestAll: false;
+      mode: Exclude<IncludedResourceMode, 'all'>;
+    };
 
 export interface UnifiedResourcesProps {
   params: UnifiedResourcesQueryParams;
@@ -171,7 +176,7 @@ export interface UnifiedResourcesProps {
    * while the unified resources component is visible.
    */
   unifiedResourcePreferencesAttempt?: AsyncAttempt<void>;
-  availabilityFilterOptions?: AvailabilityFilterOptions;
+  availabilityFilter?: ResourceAvailabilityFilter;
   unifiedResourcePreferences: UnifiedResourcePreferences;
   updateUnifiedResourcesPreferences(
     preferences: UnifiedResourcePreferences
@@ -185,7 +190,7 @@ export function UnifiedResources(props: UnifiedResourcesProps) {
     resourcesFetchAttempt,
     resources,
     fetchResources,
-    availabilityFilterOptions,
+    availabilityFilter,
     availableKinds,
     pinning,
     unifiedResourcePreferencesAttempt,
@@ -342,6 +347,29 @@ export function UnifiedResources(props: UnifiedResourcesProps) {
     });
   };
 
+  const changeAvailableResourceMode = (
+    includedResourceMode: IncludedResourceMode
+  ) => {
+    let mode = AvailableResourceMode.UNSPECIFIED;
+    switch (includedResourceMode) {
+      case 'accessible':
+        mode = AvailableResourceMode.ACCESSIBLE;
+        break;
+      case 'requestable':
+        mode = AvailableResourceMode.REQUESTABLE;
+        break;
+      case 'all':
+        mode = AvailableResourceMode.ALL;
+        break;
+      default:
+        includedResourceMode satisfies never;
+    }
+    updateUnifiedResourcesPreferences({
+      ...unifiedResourcePreferences,
+      availableResourceMode: mode,
+    });
+  };
+
   const getSelectedResources = () => {
     return resources
       .filter(({ resource }) =>
@@ -456,7 +484,8 @@ export function UnifiedResources(props: UnifiedResourcesProps) {
 
       {props.Header}
       <FilterPanel
-        availabilityFilterOptions={availabilityFilterOptions}
+        availabilityFilter={availabilityFilter}
+        changeAvailableResourceMode={changeAvailableResourceMode}
         params={params}
         setParams={setParams}
         availableKinds={availableKinds}
@@ -573,7 +602,7 @@ export function UnifiedResources(props: UnifiedResourcesProps) {
                         // require a request and should be displayed that way
                         requiresRequest:
                           resource.requiresRequest ||
-                          params.includedResources === 'requestable',
+                          availabilityFilter?.mode === 'requestable',
                       },
                     }),
                     key: generateUnifiedResourceKey(resource),
@@ -736,3 +765,30 @@ const ListFooter = styled.div`
   min-height: ${INDICATOR_SIZE};
   text-align: center;
 `;
+
+/**
+ * Returns an intersection of `availableResourceMode` and `canRequestAllResources`.
+ * Since the cluster admin can change the `showResources`
+ * setting, we shouldn't blindly follow the user preferences.
+ *
+ * Instead, if the user can't see all resources, we should default to accessible ones.
+ */
+export function getResourceAvailabilityFilter(
+  availableResourceMode: AvailableResourceMode,
+  canRequestAllResources: boolean
+): ResourceAvailabilityFilter {
+  switch (availableResourceMode) {
+    case AvailableResourceMode.ALL:
+      if (!canRequestAllResources) {
+        return { mode: 'accessible', canRequestAll: false };
+      }
+      return { mode: 'all', canRequestAll: true };
+    case AvailableResourceMode.UNSPECIFIED:
+    case AvailableResourceMode.ACCESSIBLE:
+      return { mode: 'accessible', canRequestAll: canRequestAllResources };
+    case AvailableResourceMode.REQUESTABLE:
+      return { mode: 'requestable', canRequestAll: canRequestAllResources };
+    default:
+      availableResourceMode satisfies never;
+  }
+}

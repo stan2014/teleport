@@ -28,7 +28,8 @@ import {
   UnifiedResourcesPinning,
   BulkAction,
   IncludedResourceMode,
-  AvailabilityFilterOptions,
+  ResourceAvailabilityFilter,
+  getResourceAvailabilityFilter,
 } from 'shared/components/UnifiedResources';
 import { ClusterDropdown } from 'shared/components/ClusterDropdown/ClusterDropdown';
 
@@ -65,7 +66,6 @@ export function UnifiedResources() {
         key={clusterId} // when the current cluster changes, remount the component
         clusterId={clusterId}
         isLeafCluster={isLeafCluster}
-        availabilityFilterOptions={{ hidden: true, defaultMode: 'accessible' }}
       />
     </FeatureBox>
   );
@@ -100,9 +100,8 @@ export function ClusterResources({
   clusterId,
   isLeafCluster,
   getActionButton,
-  includeRequestable,
   showCheckout = false,
-  availabilityFilterOptions,
+  availabilityFilter,
   bulkActions = [],
 }: {
   clusterId: string;
@@ -111,11 +110,10 @@ export function ClusterResources({
     resource: UnifiedResource,
     includedResourceMode: IncludedResourceMode
   ) => JSX.Element;
-  includeRequestable?: boolean;
   showCheckout?: boolean;
   /** A list of actions that can be performed on the selected items. */
   bulkActions?: BulkAction[];
-  availabilityFilterOptions?: AvailabilityFilterOptions;
+  availabilityFilter?: ResourceAvailabilityFilter;
 }) {
   const teleCtx = useTeleport();
   const flags = teleCtx.getFeatureFlags();
@@ -132,19 +130,18 @@ export function ClusterResources({
   const canCreate = teleCtx.storeUser.getTokenAccess().create;
   const [loadClusterError, setLoadClusterError] = useState('');
 
-  const getDefaultIncludedResources = (): IncludedResourceMode => {
-    if (cfg.ui.showResources !== 'requestable') {
-      return 'accessible';
-    }
-    return availabilityFilterOptions?.defaultMode || 'all';
-  };
+  //TODO: move this to enterprise.
+  const availabilityFilterFromPreferences = getResourceAvailabilityFilter(
+    preferences.unifiedResourcePreferences.availableResourceMode,
+    cfg.ui.showResources === 'requestable'
+  );
 
   const { params, setParams, replaceHistory, pathname } = useUrlFiltering({
     sort: {
       fieldName: 'name',
       dir: 'ASC',
     },
-    includedResources: getDefaultIncludedResources(),
+    includedResources: availabilityFilter?.mode,
     pinnedOnly:
       preferences?.unifiedResourcePreferences?.defaultTab === DefaultTab.PINNED,
   });
@@ -198,7 +195,6 @@ export function ClusterResources({
         params.sort,
         params.includedResources,
         teleCtx.resourceService,
-        includeRequestable,
       ]
     ),
   });
@@ -231,7 +227,7 @@ export function ClusterResources({
         params={params}
         fetchResources={fetch}
         resourcesFetchAttempt={attempt}
-        availabilityFilterOptions={availabilityFilterOptions}
+        availabilityFilter={availabilityFilterFromPreferences}
         unifiedResourcePreferences={preferences.unifiedResourcePreferences}
         updateUnifiedResourcesPreferences={preferences => {
           updatePreferences({ unifiedResourcePreferences: preferences });
