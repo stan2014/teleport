@@ -59,7 +59,7 @@ type Features struct {
 	// Currently this flag is to gate actions from OSS clusters.
 	//
 	// Determining support for access request is currently determined by:
-	//   1) Enterprise + [Features.IdentityGovernanceSecurity] == true, new flag
+	//   1) Enterprise + [Features.Identity] == true, new flag
 	//   introduced with Enterprise Usage Based (EUB) product.
 	//   2) Enterprise + [Features.IsUsageBasedBilling] == false, legacy support
 	//   where before EUB, it was unlimited.
@@ -92,16 +92,15 @@ type Features struct {
 	AccessRequests AccessRequestsFeature
 	// CustomTheme holds the name of WebUI custom theme.
 	CustomTheme string
-
 	// AccessGraph enables the usage of access graph.
 	// NOTE: this is a legacy flag that is currently used to signal
 	// that Access Graph integration is *enabled* on a cluster.
 	// *Access* to the feature is gated on the `Policy` flag.
 	// TODO(justinas): remove this field once "TAG enabled" status is moved to a resource in the backend.
 	AccessGraph bool
-	// IdentityGovernanceSecurity indicates whether IGS related features are enabled:
+	// Identity indicates whether IGS related features are enabled:
 	// access list, access request, access monitoring, device trust.
-	IdentityGovernanceSecurity bool
+	Identity bool
 	// AccessList holds its namesake feature settings.
 	AccessList AccessListFeature
 	// AccessMonitoring holds its namesake feature settings.
@@ -123,16 +122,23 @@ type Features struct {
 	JoinActiveSessions bool
 	// MobileDeviceManagement indicates whether endpoints management (like Jamf Plugin) can be used in the cluster
 	MobileDeviceManagement bool
+
+	CloudAuditLogRetention bool
+	OktaSCIM               bool
+	OktaUserSync           bool
+	SessionLocks           bool
+	UpsellAlert            bool
+	UsageReporting         bool
 }
 
 // DeviceTrustFeature holds the Device Trust feature general and usage-based
 // settings.
-// Limits have no affect if [Feature.IdentityGovernanceSecurity] is enabled.
+// Limits have no affect if [Feature.Identity] is enabled.
 type DeviceTrustFeature struct {
 	// Currently this flag is to gate actions from OSS clusters.
 	//
 	// Determining support for device trust is currently determined by:
-	//   1) Enterprise + [Features.IdentityGovernanceSecurity] == true, new flag
+	//   1) Enterprise + [Features.Identity] == true, new flag
 	//   introduced with Enterprise Usage Based (EUB) product.
 	//   2) Enterprise + [Features.IsUsageBasedBilling] == false, legacy support
 	//   where before EUB, it was unlimited.
@@ -143,7 +149,7 @@ type DeviceTrustFeature struct {
 }
 
 // AccessRequestsFeature holds the Access Requests feature general and usage-based settings.
-// Limits have no affect if [Feature.IdentityGovernanceSecurity] is enabled.
+// Limits have no affect if [Feature.Identity] is enabled.
 type AccessRequestsFeature struct {
 	// MonthlyRequestLimit is the usage-based limit for the number of
 	// access requests created in a calendar month.
@@ -159,7 +165,7 @@ type AccessListFeature struct {
 }
 
 // AccessMonitoring holds the Access Monitoring feature settings.
-// Limits have no affect if [Feature.IdentityGovernanceSecurity] is enabled.
+// Limits have no affect if [Feature.Identity] is enabled.
 type AccessMonitoringFeature struct {
 	// True if enabled in the auth service config: [auth_service.access_monitoring.enabled].
 	Enabled bool
@@ -201,7 +207,7 @@ func (f Features) ToProto() *proto.Features {
 		AccessRequests: &proto.AccessRequestsFeature{
 			MonthlyRequestLimit: int32(f.AccessRequests.MonthlyRequestLimit),
 		},
-		IdentityGovernance: f.IdentityGovernanceSecurity,
+		IdentityGovernance: f.Identity,
 		AccessMonitoring: &proto.AccessMonitoringFeature{
 			Enabled:             f.AccessMonitoring.Enabled,
 			MaxReportRangeLimit: int32(f.AccessMonitoring.MaxReportRangeLimit),
@@ -241,7 +247,7 @@ func (f Features) IsLegacy() bool {
 }
 
 func (f Features) IGSEnabled() bool {
-	return f.IdentityGovernanceSecurity
+	return f.Identity
 }
 
 // TODO(mcbattirola): remove isTeam when it is no longer used

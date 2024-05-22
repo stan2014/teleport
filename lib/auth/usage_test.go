@@ -73,7 +73,7 @@ func TestAccessRequest_WithAndWithoutLimit(t *testing.T) {
 	require.Error(t, err, "expected access request creation to fail due to the monthly limit")
 
 	// Lift limit with IGS, expect no limit error.
-	s.features.IdentityGovernanceSecurity = true
+	s.features.Identity = true
 	modules.SetTestModules(t, &modules.TestModules{
 		TestFeatures: s.features,
 	})
@@ -81,7 +81,7 @@ func TestAccessRequest_WithAndWithoutLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Put back limit, expect limit error.
-	s.features.IdentityGovernanceSecurity = false
+	s.features.Identity = false
 	modules.SetTestModules(t, &modules.TestModules{
 		TestFeatures: s.features,
 	})

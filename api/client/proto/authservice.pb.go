@@ -2054,7 +2054,7 @@ type Features struct {
 	// Currently this flag is to gate actions from OSS clusters.
 	//
 	// Determining support for access request is currently determined by:
-	//   1) Enterprise + [Features.IdentityGovernanceSecurity] == true, new flag
+	//   1) Enterprise + [Features.Identity] == true, new flag
 	//   introduced with Enterprise Usage Based (EUB) product.
 	//   2) Enterprise + [Features.IsUsageBasedBilling] == false, legacy support
 	//   where before EUB, it was unlimited.
@@ -2379,7 +2379,7 @@ type DeviceTrustFeature struct {
 	// Currently this flag is to gate actions from OSS clusters.
 	//
 	// Determining support for device trust is currently determined by:
-	//   1) Enterprise + [Features.IdentityGovernanceSecurity] == true, new flag
+	//   1) Enterprise + [Features.Identity] == true, new flag
 	//   introduced with Enterprise Usage Based (EUB) product.
 	//   2) Enterprise + [Features.IsUsageBasedBilling] == false, legacy support
 	//   where before EUB, it was unlimited.

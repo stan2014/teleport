@@ -398,8 +398,8 @@ func TestAccessLists(t *testing.T) {
 			modules.SetTestModules(t, &modules.TestModules{
 				TestBuildType: modules.BuildEnterprise,
 				TestFeatures: modules.Features{
-					Cloud:                      test.cloud,
-					IdentityGovernanceSecurity: true,
+					Cloud:    test.cloud,
+					Identity: true,
 				},
 			})
 

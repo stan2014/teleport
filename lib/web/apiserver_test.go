@@ -4677,8 +4677,8 @@ func TestGetWebConfig_IGSFeatureLimits(t *testing.T) {
 
 	modules.SetTestModules(t, &modules.TestModules{
 		TestFeatures: modules.Features{
-			ProductType:                modules.ProductTypeTeam,
-			IdentityGovernanceSecurity: true,
+			ProductType: modules.ProductTypeTeam,
+			Identity:    true,
 			AccessList: modules.AccessListFeature{
 				CreateLimit: 5,
 			},
