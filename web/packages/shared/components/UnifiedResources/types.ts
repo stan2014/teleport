@@ -112,7 +112,6 @@ export type UnifiedResourcesQueryParams = {
   pinnedOnly?: boolean;
   // TODO(bl-nero): Remove this once filters are expressed as advanced search.
   kinds?: string[];
-  includedResources?: IncludedResourceMode;
 };
 export interface UnifiedResourceViewItem {
   name: string;
