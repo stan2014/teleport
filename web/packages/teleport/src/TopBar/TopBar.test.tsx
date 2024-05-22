@@ -17,10 +17,12 @@
  */
 
 import React from 'react';
+import { act } from '@testing-library/react';
 import { subSeconds, subMinutes } from 'date-fns';
 import { render, screen, userEvent } from 'design/utils/testing';
 import { Router } from 'react-router';
 import { createMemoryHistory } from 'history';
+import { mockIntersectionObserver } from 'jsdom-testing-mocks';
 
 import { LayoutContextProvider } from 'teleport/Main/LayoutContext';
 import TeleportContextProvider from 'teleport/TeleportContextProvider';
@@ -42,6 +44,8 @@ import { TopBar } from './TopBar';
 
 let ctx: TeleportContext;
 
+const mio = mockIntersectionObserver();
+
 beforeEach(() => jest.clearAllMocks());
 
 function setup(): void {
@@ -58,33 +62,6 @@ function setup(): void {
       name: 'test-cluster',
       lastConnected: Date.now(),
     },
-  });
-
-  global.IntersectionObserver = jest.fn(callback => {
-    callback(
-      [
-        {
-          // This is the property that triggers the fetch. We need it to be true.
-          isIntersecting: true,
-          intersectionRatio: null,
-          boundingClientRect: null,
-          intersectionRect: null,
-          rootBounds: null,
-          target: null,
-          time: null,
-        },
-      ],
-      null
-    );
-    return {
-      observe: jest.fn(),
-      unobserve: jest.fn(),
-      disconnect: jest.fn(),
-      takeRecords: jest.fn(),
-      root: null,
-      rootMargin: null,
-      thresholds: null,
-    };
   });
 
   mockUserContextProviderWith(makeTestUserContext());
@@ -153,6 +130,8 @@ test('notification bell with notification', async () => {
 
   // Test clicking and rendering of dropdown.
   expect(screen.getByTestId('tb-notifications-dropdown')).not.toBeVisible();
+
+  act(mio.enterAll);
 
   await userEvent.click(screen.getByTestId('tb-notifications-button'));
   expect(screen.getByTestId('tb-notifications-dropdown')).toBeVisible();

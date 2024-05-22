@@ -65,7 +65,9 @@ export type UpsertNotificationStateRequest = {
 export type Notification = {
   /** id is the uuid of this notification */
   id: string;
-  /* subKind is a string which represents which type of notification this is, ie. "access-request-approved" */
+  /* subKind is a string which represents which type of notification this is, ie. "access-request-approved"
+   * StoreNotificationKinds are the kinds for local notifications.
+   */
   subKind: NotificationSubKind | StoreNotificationKinds;
   /** createdDate is when the notification was created. */
   createdDate: Date;
@@ -76,7 +78,8 @@ export type Notification = {
   /** title is the title of this notification. This can be overwritten in notificationContentFactory if needed. */
   title: string;
   /** localNotification is whether this is a notification stored in a frontend store as opposed to a "real" notification
-   * from the notifications system.
+   * from the notifications system. The reason for this is that some notification types (such as access lists) are not supported
+   * by the backend notifications system, and are instead generated entirely on the frontend.
    */
   localNotification?: boolean;
 };

@@ -164,4 +164,25 @@ export class StoreNotifications extends Store<NotificationStoreState> {
       JSON.stringify(updatedStates)
     );
   }
+
+  resetNotificationStatesForNotification(id: string) {
+    const currentStates = this.getNotificationStates();
+
+    const newClicked = currentStates.clicked.filter(
+      notificationId => notificationId !== id
+    );
+    const newHidden = currentStates.hidden.filter(
+      notificationId => notificationId !== id
+    );
+
+    const updatedStates: LocalNotificationStates = {
+      clicked: newClicked,
+      hidden: newHidden,
+    };
+
+    localStorage.setItem(
+      KeysEnum.LOCAL_NOTIFICATION_STATES,
+      JSON.stringify(updatedStates)
+    );
+  }
 }

@@ -73,6 +73,7 @@ export function notificationContentFactory({
         type: 'warning',
         icon: Icons.UserList,
         redirectRoute,
+        hideDate: true,
       };
       break;
     default:
@@ -89,6 +90,8 @@ type NotificationContentBase = {
   type: 'success' | 'success-alt' | 'informational' | 'warning' | 'failure';
   /** icon is the icon to render for this notification. This should be an icon from `design/Icon`. */
   icon: React.FC<IconProps>;
+  /** hideDate is whether to not display how old the notification is in the top right corner of the notification. */
+  hideDate?: boolean;
 };
 
 /** For notifications that are clickable and redirect you to a page, and may also optionally include a quick action. */

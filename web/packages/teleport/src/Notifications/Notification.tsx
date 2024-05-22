@@ -48,17 +48,26 @@ import useStickyClusterId from 'teleport/useStickyClusterId';
 import { useTeleport } from '..';
 
 import { NotificationContent } from './notificationContentFactory';
+import { View } from './Notifications';
 
 export function Notification({
   notification,
+  view = 'All',
   closeNotificationsList,
   removeNotification,
   markNotificationAsClicked,
 }: {
   notification: NotificationType;
+  view?: View;
   closeNotificationsList: () => void;
-  removeNotification?: (notificationId: string) => void;
-  markNotificationAsClicked?: (notificationId: string) => void;
+  removeNotification: (
+    notificationId: string,
+    isLocalNotification: boolean
+  ) => void;
+  markNotificationAsClicked: (
+    notificationId: string,
+    isLocalNotification: boolean
+  ) => void;
 }) {
   const ctx = useTeleport();
   const { clusterId } = useStickyClusterId();
@@ -72,7 +81,10 @@ export function Notification({
         notificationState: NotificationState.CLICKED,
       })
       .then(res => {
-        markNotificationAsClicked(notification.id);
+        markNotificationAsClicked(
+          notification.id,
+          notification.localNotification
+        );
         return res;
       })
   );
@@ -84,14 +96,17 @@ export function Notification({
         notificationState: NotificationState.DISMISSED,
       })
       .then(() => {
-        removeNotification(notification.id);
+        removeNotification(notification.id, notification.localNotification);
       });
   });
 
   function onMarkAsClicked() {
     if (notification.localNotification) {
       ctx.storeNotifications.markNotificationAsClicked(notification.id);
-      markNotificationAsClicked(notification.id);
+      markNotificationAsClicked(
+        notification.id,
+        notification.localNotification
+      );
       return;
     }
     markAsClicked();
@@ -100,7 +115,7 @@ export function Notification({
   function onHide() {
     if (notification.localNotification) {
       ctx.storeNotifications.markNotificationAsHidden(notification.id);
-      removeNotification(notification.id);
+      removeNotification(notification.id, notification.localNotification);
       return;
     }
     hideNotification();
@@ -112,7 +127,7 @@ export function Notification({
 
   // If the notification is unsupported or hidden, or if the view is "Unread" and the notification has been read,
   // it should not be shown.
-  if (!content) {
+  if (!content || (view === 'Unread' && notification.clicked)) {
     return null;
   }
 
@@ -136,7 +151,6 @@ export function Notification({
   const formattedDate = formatDate(notification.createdDate);
 
   function onNotificationClick(e: React.MouseEvent<HTMLElement>) {
-    onMarkAsClicked();
     // Prevents this from being triggered when the user is just clicking away from
     // an open "mark as read/hide this notification" menu popover.
     if (e.currentTarget.contains(e.target as HTMLElement)) {
@@ -144,6 +158,7 @@ export function Notification({
         setShowTextContentDialog(true);
         return;
       }
+      onMarkAsClicked();
       closeNotificationsList();
       history.push(content.redirectRoute);
     }
@@ -188,7 +203,9 @@ export function Notification({
             )}
           </ContentBody>
           <SideContent>
-            <Text typography="subtitle3">{formattedDate}</Text>
+            {!content?.hideDate && (
+              <Text typography="subtitle3">{formattedDate}</Text>
+            )}
             <MenuIcon
               menuProps={{
                 anchorOrigin: { vertical: 'bottom', horizontal: 'right' },
