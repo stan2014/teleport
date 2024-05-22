@@ -258,14 +258,6 @@ func (u *HostUserManagement) CreateUser(name string, ui *services.HostUsersInfo)
 	}
 
 	if tempUser != nil {
-		if err := u.backend.SetUserGroups(name, groups); err != nil {
-			return nil, trace.Wrap(err)
-		}
-		gids, err := u.backend.UserGIDs(tempUser)
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-
 		// Collect actions that need to be done together under a lock on the user.
 		actionsUnderLock := []func() error{
 			func() error {
@@ -292,6 +284,10 @@ func (u *HostUserManagement) CreateUser(name string, ui *services.HostUsersInfo)
 				}
 				return nil, trace.AlreadyExists("User %q already exists, however no users are currently managed by teleport", name)
 			}
+			return nil, trace.Wrap(err)
+		}
+		gids, err := u.backend.UserGIDs(tempUser)
+		if err != nil {
 			return nil, trace.Wrap(err)
 		}
 		var found bool
