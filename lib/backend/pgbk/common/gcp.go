@@ -25,7 +25,6 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn"
 	"github.com/gravitational/trace"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -34,31 +33,20 @@ import (
 	gcputils "github.com/gravitational/teleport/lib/utils/gcp"
 )
 
-// ConfigureConnectionForGCPCloudSQL configures the provide poolConfig to use
-// cloudsqlconn for "automatic" IAM database authentication.
+// GCPCloudSQLDialFunc creates a pgconn.DialFunc to use cloudsqlconn for
+// "automatic" IAM database authentication.
 //
 // https://cloud.google.com/sql/docs/postgres/iam-authentication
-func ConfigureConnectionForGCPCloudSQL(ctx context.Context, logger *slog.Logger, connConfig *pgx.ConnConfig) error {
-	if connConfig == nil {
-		return trace.BadParameter("missing connection config")
+func GCPCloudSQLDialFunc(ctx context.Context, config AuthConfig, dbUser string, logger *slog.Logger) (pgconn.DialFunc, error) {
+	// IAM auth users have the PostgreSQL username of their emails minus
+	// the ".gserviceaccount.com" part. Now add the suffix back for the
+	// full service account email.
+	targetServiceAccount := dbUser + ".gserviceaccount.com"
+	if err := gcputils.ValidateGCPServiceAccountName(targetServiceAccount); err != nil {
+		return nil, trace.Wrap(err, "IAM database user for service account should have usernames in format of <service_account_name>@<project_id>.iam but got %s", dbUser)
 	}
 
-	gcpConfig, err := gcpConfigFromConnConfig(connConfig)
-	if err != nil {
-		return trace.Wrap(err, "invalid postgresql url %s", connConfig.ConnString())
-	}
-
-	dialFunc, err := makeGCPCloudSQLDialFunc(ctx, gcpConfig, logger)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	connConfig.DialFunc = dialFunc
-	return nil
-}
-
-func makeGCPCloudSQLDialFunc(ctx context.Context, config *gcpConfig, logger *slog.Logger) (pgconn.DialFunc, error) {
-	iamAuthOptions, err := makeGCPCloudSQLAuthOptionsForServiceAccount(ctx, config.serviceAccount, gcpServiceAccountImpersonatorImpl{}, logger)
+	iamAuthOptions, err := makeGCPCloudSQLAuthOptionsForServiceAccount(ctx, targetServiceAccount, gcpServiceAccountImpersonatorImpl{}, logger)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -69,14 +57,14 @@ func makeGCPCloudSQLDialFunc(ctx context.Context, config *gcpConfig, logger *slo
 	}
 
 	var dialOptions []cloudsqlconn.DialOption
-	if ipTypeOption := config.ipType.cloudsqlconnOption(); ipTypeOption != nil {
+	if ipTypeOption := config.GCPIPType.cloudsqlconnOption(); ipTypeOption != nil {
 		dialOptions = append(dialOptions, ipTypeOption)
 	}
 
 	return func(ctx context.Context, _, _ string) (net.Conn, error) {
 		// Use connection name and ignore network and host address.
-		logger.DebugContext(ctx, "Dialing GCP Cloud SQL.", "connection_name", config.connectionName, "service_account", config.serviceAccount, "ip_type", config.ipType)
-		conn, err := dialer.Dial(ctx, config.connectionName, dialOptions...)
+		logger.DebugContext(ctx, "Dialing GCP Cloud SQL.", "connection_name", config.GCPConnectionName, "service_account", targetServiceAccount, "ip_type", config.GCPIPType)
+		conn, err := dialer.Dial(ctx, targetServiceAccount, dialOptions...)
 		return conn, trace.Wrap(err)
 	}, nil
 }
