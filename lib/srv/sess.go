@@ -367,11 +367,6 @@ func (s *SessionRegistry) OpenExecSession(ctx context.Context, channel ssh.Chann
 		scx.Tracef("Session found, reusing it %s", sessionID)
 	}
 
-	_, found = scx.GetEnv(teleport.EnableNonInteractiveSessionRecording)
-	if found {
-		scx.recordNonInteractiveSession = true
-	}
-
 	// This logic allows concurrent request to create a new session
 	// to fail, what is ok because we should never have this condition.
 	sess, _, err := newSession(ctx, sessionID, s, scx, channel)
@@ -1384,6 +1379,11 @@ func newRecorder(s *session, ctx *ServerContext) (events.SessionPreparerRecorder
 		return events.WithNoOpPreparer(events.NewDiscardRecorder()), nil
 	}
 
+	// Don't record non-interactive sessions when enhanced recording is disabled.
+	if ctx.GetTerm() == nil && !ctx.srv.GetBPF().Enabled() {
+		return events.WithNoOpPreparer(events.NewDiscardRecorder()), nil
+	}
+
 	rec, err := recorder.New(recorder.Config{
 		SessionID:    s.id,
 		ServerID:     s.serverMeta.ServerID,
@@ -1414,12 +1414,6 @@ func newRecorder(s *session, ctx *ServerContext) (events.SessionPreparerRecorder
 }
 
 func (s *session) startExec(ctx context.Context, channel ssh.Channel, scx *ServerContext) error {
-	if scx.recordNonInteractiveSession {
-		// enable recording.
-		s.io.AddWriter(sessionRecorderID, utils.WriteCloserWithContext(scx.srv.Context(), s.Recorder()))
-		s.scx.multiWriter = s.io
-	}
-
 	// Emit a session.start event for the exec session.
 	s.emitSessionStartEvent(scx)
 
@@ -1473,10 +1467,6 @@ func (s *session) startExec(ctx context.Context, channel ssh.Channel, scx *Serve
 
 	// Process has been placed in a cgroup, continue execution.
 	execRequest.Continue()
-
-	if scx.recordNonInteractiveSession {
-		s.io.On()
-	}
 
 	// Process is running, wait for it to stop.
 	go func() {
