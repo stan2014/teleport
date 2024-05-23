@@ -65,12 +65,12 @@ export const VnetSliderStep = (props: StepComponentProps) => {
           <Text>Could not stop VNet: {stopAttempt.statusText}</Text>
         )}
 
-        {status === 'stopped' && (
+        {status.value === 'stopped' && (
           <Text>VNet automatically authenticates connections to TCP apps.</Text>
         )}
       </Flex>
 
-      {status === 'running' && (
+      {status.value === 'running' && (
         <>
           <Text p={textSpacing}>
             Proxying connections to .teleport-local.dev, .company.private
