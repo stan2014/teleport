@@ -77,6 +77,37 @@ const (
 	AzureADAuth AuthMode = "azure"
 )
 
+const (
+	schemaV1Table = `CREATE TABLE events (
+		event_time timestamptz NOT NULL,
+		event_id uuid NOT NULL,
+		event_type text NOT NULL,
+		session_id uuid NOT NULL,
+		event_data json NOT NULL,
+		creation_time timestamptz NOT NULL DEFAULT now(),
+		CONSTRAINT events_pkey PRIMARY KEY (event_time, event_id)
+	);`
+	schemaV1CreationTimeIndexPg   = `CREATE INDEX events_creation_time_idx ON events USING brin (creation_time);`
+	schemaV1CreationTimeIndexCRDB = `CREATE INDEX events_creation_time_idx ON events (creation_time);`
+	schemaV1SessionIDIndex        = `CREATE INDEX events_search_session_events_idx ON events (session_id, event_time, event_id)
+		WHERE session_id != '00000000-0000-0000-0000-000000000000';`
+)
+
+func buildSchemas(isCockroach bool) []string {
+	sb := strings.Builder{}
+	sb.WriteString(schemaV1Table)
+	sb.WriteRune('\n')
+	// Cockroach doesn't support BRIN indice
+	if isCockroach {
+		sb.WriteString(schemaV1CreationTimeIndexCRDB)
+	} else {
+		sb.WriteString(schemaV1CreationTimeIndexPg)
+	}
+	sb.WriteRune('\n')
+	sb.WriteString(schemaV1SessionIDIndex)
+	return []string{sb.String()}
+}
+
 // Check returns an error if the AuthMode is invalid.
 func (a AuthMode) Check() error {
 	switch a {
@@ -206,6 +237,13 @@ func New(ctx context.Context, cfg Config) (*Log, error) {
 		return nil, trace.Wrap(err)
 	}
 
+	isCockroach, err := detectCockroach(ctx, pool)
+	if err != nil {
+		cfg.Log.WithError(err).Warn("Failed to detect if using CockroachDB, continuing assuming it's not.")
+	}
+
+	schemas := buildSchemas(isCockroach)
+
 	if err := pgcommon.SetupAndMigrate(ctx, cfg.Log, pool, "audit_version", schemas); err != nil {
 		pool.Close()
 		return nil, trace.Wrap(err)
@@ -243,21 +281,6 @@ func (l *Log) Close() error {
 	l.wg.Wait()
 	l.pool.Close()
 	return nil
-}
-
-var schemas = []string{
-	`CREATE TABLE events (
-		event_time timestamptz NOT NULL,
-		event_id uuid NOT NULL,
-		event_type text NOT NULL,
-		session_id uuid NOT NULL,
-		event_data json NOT NULL,
-		creation_time timestamptz NOT NULL DEFAULT now(),
-		CONSTRAINT events_pkey PRIMARY KEY (event_time, event_id)
-	);
-	CREATE INDEX events_creation_time_idx ON events USING brin (creation_time);
-	CREATE INDEX events_search_session_events_idx ON events (session_id, event_time, event_id)
-		WHERE session_id != '00000000-0000-0000-0000-000000000000';`,
 }
 
 // periodicCleanup removes events past the retention period from the table,

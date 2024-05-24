@@ -19,12 +19,14 @@
 package pgevents
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/gravitational/trace"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // toNextKey returns a URL-safe pagination key for SearchEvents and
@@ -54,4 +56,15 @@ func fromStartKey(key string) (time.Time, uuid.UUID, error) {
 	copy(id[:], b[8:8+16])
 
 	return t, id, nil
+}
+
+func detectCockroach(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return false, trace.Wrap(err)
+	}
+	defer conn.Release()
+	return conn.Conn().PgConn().ParameterStatus("crdb_version") != "", nil
 }

@@ -125,3 +125,54 @@ func TestConfig(t *testing.T) {
 		require.Equal(t, expectedConfig, &actualConfig)
 	}
 }
+
+func Test_buildSchemas(t *testing.T) {
+	type args struct {
+		isCockroach bool
+	}
+	tests := []struct {
+		name string
+		args args
+		want []string
+	}{
+		{
+			name: "postgres",
+			args: args{isCockroach: false},
+			want: []string{`CREATE TABLE events (
+		event_time timestamptz NOT NULL,
+		event_id uuid NOT NULL,
+		event_type text NOT NULL,
+		session_id uuid NOT NULL,
+		event_data json NOT NULL,
+		creation_time timestamptz NOT NULL DEFAULT now(),
+		CONSTRAINT events_pkey PRIMARY KEY (event_time, event_id)
+	);
+CREATE INDEX events_creation_time_idx ON events USING brin (creation_time);
+CREATE INDEX events_search_session_events_idx ON events (session_id, event_time, event_id)
+		WHERE session_id != '00000000-0000-0000-0000-000000000000';`,
+			},
+		},
+		{
+			name: "cockroach",
+			args: args{isCockroach: true},
+			want: []string{`CREATE TABLE events (
+		event_time timestamptz NOT NULL,
+		event_id uuid NOT NULL,
+		event_type text NOT NULL,
+		session_id uuid NOT NULL,
+		event_data json NOT NULL,
+		creation_time timestamptz NOT NULL DEFAULT now(),
+		CONSTRAINT events_pkey PRIMARY KEY (event_time, event_id)
+	);
+CREATE INDEX events_creation_time_idx ON events (creation_time);
+CREATE INDEX events_search_session_events_idx ON events (session_id, event_time, event_id)
+		WHERE session_id != '00000000-0000-0000-0000-000000000000';`,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, buildSchemas(tt.args.isCockroach))
+		})
+	}
+}
