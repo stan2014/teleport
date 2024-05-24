@@ -95,6 +95,12 @@ This certificate contains information about the agent, including:
   Database Service.
 - The **expiry time** of the certificate.
 
+{/* TODO: Expand this paragraph to talk about the contents of the X.509 certs
+issued for mTLS between the Proxy Service and agents*/}
+The Auth Service also generates a short-lived X.509 certificate signed by the
+cluster's host CA, with the client's identity and routing information for an
+infrastructure resource encoded in it.
+
 ## Teleport agents to the Teleport Proxy Service
 
 In most cases, when an agent joins a Teleport cluster, it establishes an SSH
@@ -105,15 +111,17 @@ firewall.
 
 ![Tunnel Mode](../../img/architecture/k8s-tunnel.png)
 
-The connection between the Proxy Service and a Teleport agent instance is also
-authenticated with mutual TLS. The Auth Service generates a short-lived X.509
-certificate signed by the cluster's host CA, with the client's identity and
-routing information for an infrastructure resource encoded in it, and the Proxy
-Service uses it to authenticate with the Teleport agent.
+Agents use the reverse tunnel to retrieve certificates from the Teleport Auth
+Service. {/*TODO: How does authentication work when first setting up the reverse
+tunnel?*/}
 
-The Proxy Service authenticates the connection and dispatches it to the
-appropriate agent instance based on the routing information encoded in the
-client certificate, over the reverse tunnel.
+{/* TODO: Expand on this paragraph. The agent uses a cert to authenticate with
+the Proxy Service? What does it mean to route a connection to the appropriate
+agent?*/}
+The connection between the Proxy Service and a Teleport agent instance is also
+authenticated with mutual TLS. The Proxy Service authenticates the connection
+and dispatches it to the appropriate agent instance based on the routing
+information encoded in the client certificate, over the reverse tunnel.
 
 <Details title="Connecting to agents without reverse tunnels">
 
