@@ -385,60 +385,8 @@ func TestDialFakeApp(t *testing.T) {
 	t.Cleanup(cancel)
 
 	clock := clockwork.NewFakeClockAt(time.Now())
-
 	ca := newSelfSignedCA(t)
-
-	roots := x509.NewCertPool()
-	caX509, err := x509.ParseCertificate(ca.Certificate[0])
-	require.NoError(t, err)
-	roots.AddCert(caX509)
-
-	const proxyCN = "testproxy"
-	proxyCert := newServerCert(t, ca, proxyCN, clock.Now().Add(365*24*time.Hour))
-
-	proxyTLSConfig := &tls.Config{
-		Certificates: []tls.Certificate{proxyCert},
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    roots,
-	}
-
-	listener, err := tls.Listen("tcp", "localhost:0", proxyTLSConfig)
-	require.NoError(t, err)
-
-	// Run a fake web proxy that will accept any client connection and echo the input back.
-	utils.RunTestBackgroundTask(ctx, t, &utils.TestBackgroundTask{
-		Name: "web proxy",
-		Task: func(ctx context.Context) error {
-			for {
-				conn, err := listener.Accept()
-				if err != nil {
-					if utils.IsOKNetworkError(err) {
-						return nil
-					}
-					return trace.Wrap(err)
-				}
-				go func() {
-					_, err := io.Copy(conn, conn)
-					if utils.IsOKNetworkError(err) {
-						err = nil
-					}
-					assert.NoError(t, err)
-				}()
-			}
-		},
-		Terminate: func() error {
-			if err := listener.Close(); !utils.IsOKNetworkError(err) {
-				return trace.Wrap(err)
-			}
-			return nil
-		},
-	})
-
-	dialOpts := DialOptions{
-		WebProxyAddr:          listener.Addr().String(),
-		RootClusterCACertPool: roots,
-		SNI:                   proxyCN,
-	}
+	dialOpts := mustStartFakeWebProxy(ctx, t, ca, clock)
 
 	const appCertLifetime = time.Hour
 	reissueClientCert := func() tls.Certificate {
@@ -576,60 +524,8 @@ func TestOnNewConnection(t *testing.T) {
 	t.Cleanup(cancel)
 
 	clock := clockwork.NewFakeClockAt(time.Now())
-
 	ca := newSelfSignedCA(t)
-
-	roots := x509.NewCertPool()
-	caX509, err := x509.ParseCertificate(ca.Certificate[0])
-	require.NoError(t, err)
-	roots.AddCert(caX509)
-
-	const proxyCN = "testproxy"
-	proxyCert := newServerCert(t, ca, proxyCN, clock.Now().Add(365*24*time.Hour))
-
-	proxyTLSConfig := &tls.Config{
-		Certificates: []tls.Certificate{proxyCert},
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    roots,
-	}
-
-	listener, err := tls.Listen("tcp", "localhost:0", proxyTLSConfig)
-	require.NoError(t, err)
-
-	// Run a fake web proxy that will accept any client connection and echo the input back.
-	utils.RunTestBackgroundTask(ctx, t, &utils.TestBackgroundTask{
-		Name: "web proxy",
-		Task: func(ctx context.Context) error {
-			for {
-				conn, err := listener.Accept()
-				if err != nil {
-					if utils.IsOKNetworkError(err) {
-						return nil
-					}
-					return trace.Wrap(err)
-				}
-				go func() {
-					_, err := io.Copy(conn, conn)
-					if utils.IsOKNetworkError(err) {
-						err = nil
-					}
-					assert.NoError(t, err)
-				}()
-			}
-		},
-		Terminate: func() error {
-			if err := listener.Close(); !utils.IsOKNetworkError(err) {
-				return trace.Wrap(err)
-			}
-			return nil
-		},
-	})
-
-	dialOpts := DialOptions{
-		WebProxyAddr:          listener.Addr().String(),
-		RootClusterCACertPool: roots,
-		SNI:                   proxyCN,
-	}
+	dialOpts := mustStartFakeWebProxy(ctx, t, ca, clock)
 
 	const appCertLifetime = time.Hour
 	reissueClientCert := func() tls.Certificate {
@@ -653,7 +549,7 @@ func TestOnNewConnection(t *testing.T) {
 	// called.
 	lookupCtx, lookupCtxCancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer lookupCtxCancel()
-	_, err = p.lookupHost(lookupCtx, invalidAppName)
+	_, err := p.lookupHost(lookupCtx, invalidAppName)
 	require.Error(t, err, "Expected lookup of an invalid app to fail")
 	require.Equal(t, uint32(0), appProvider.onNewConnectionCallCount.Load())
 
@@ -808,4 +704,62 @@ func newLeafCert(t *testing.T, ca tls.Certificate, cn string, expires time.Time,
 		Certificate: [][]byte{certBytes},
 		PrivateKey:  priv,
 	}
+}
+
+func mustStartFakeWebProxy(ctx context.Context, t *testing.T, ca tls.Certificate, clock clockwork.FakeClock) DialOptions {
+	t.Helper()
+
+	roots := x509.NewCertPool()
+	caX509, err := x509.ParseCertificate(ca.Certificate[0])
+	require.NoError(t, err)
+	roots.AddCert(caX509)
+
+	const proxyCN = "testproxy"
+	proxyCert := newServerCert(t, ca, proxyCN, clock.Now().Add(365*24*time.Hour))
+
+	proxyTLSConfig := &tls.Config{
+		Certificates: []tls.Certificate{proxyCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    roots,
+	}
+
+	listener, err := tls.Listen("tcp", "localhost:0", proxyTLSConfig)
+	require.NoError(t, err)
+
+	// Run a fake web proxy that will accept any client connection and echo the input back.
+	utils.RunTestBackgroundTask(ctx, t, &utils.TestBackgroundTask{
+		Name: "web proxy",
+		Task: func(ctx context.Context) error {
+			for {
+				conn, err := listener.Accept()
+				if err != nil {
+					if utils.IsOKNetworkError(err) {
+						return nil
+					}
+					return trace.Wrap(err)
+				}
+				go func() {
+					_, err := io.Copy(conn, conn)
+					if utils.IsOKNetworkError(err) {
+						err = nil
+					}
+					assert.NoError(t, err)
+				}()
+			}
+		},
+		Terminate: func() error {
+			if err := listener.Close(); !utils.IsOKNetworkError(err) {
+				return trace.Wrap(err)
+			}
+			return nil
+		},
+	})
+
+	dialOpts := DialOptions{
+		WebProxyAddr:          listener.Addr().String(),
+		RootClusterCACertPool: roots,
+		SNI:                   proxyCN,
+	}
+
+	return dialOpts
 }
