@@ -178,14 +178,7 @@ self-hosted Teleport deployment.
 
 </Details>
 
-## Connecting to infrastructure through Teleport agents
-
-Teleport users can access resources in their infrastructure with the `tsh`
-client CLI, the Teleport Web UI, and Teleport Connect, in addition to native
-client tools like `kubectl` and `psql`. Client tools route traffic through
-agents, usually routed through the Teleport Proxy Service.
-
-### Communication between agents and infrastructure resources
+## Agents and infrastructure resources
 
 Teleport agents route user traffic to and from resources in your infrastructure.
 Agents authenticate with infrastructure resources using a technique available to
@@ -223,7 +216,7 @@ Teleport cluster:
 - [OpenSSH servers](../server-access/openssh.mdx)
 - [Windows desktops](../desktop-access/gertting-started.mdx)
 
-### Communication between clients and agents
+## Clients and agents
 
 Teleport makes several client tools available for accessing infrastructure
 resources through agents:
@@ -266,7 +259,7 @@ CLI:
 `tsh proxy` commands. For example, depending on the database, `tsh db connect`
 starts a local proxy before using a database client to send traffic to it.
 
-### Submitting audit events
+## Submitting audit events
 
 Teleport agents connect to the Teleport Auth Service through the Teleport Proxy
 Service and submit audit events at various moments within the life cycle of a
