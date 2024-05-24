@@ -61,10 +61,10 @@ func fromStartKey(key string) (time.Time, uuid.UUID, error) {
 func detectCockroach(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		return false, trace.Wrap(err)
-	}
-	defer conn.Release()
-	return conn.Conn().PgConn().ParameterStatus("crdb_version") != "", nil
+	var isCockroach bool
+	err := pool.AcquireFunc(ctx, func(conn *pgxpool.Conn) error {
+		isCockroach = conn.Conn().PgConn().ParameterStatus("crdb_version") != ""
+		return nil
+	})
+	return isCockroach, trace.Wrap(err)
 }

@@ -97,7 +97,7 @@ func buildSchemas(isCockroach bool) []string {
 	sb := strings.Builder{}
 	sb.WriteString(schemaV1Table)
 	sb.WriteRune('\n')
-	// Cockroach doesn't support BRIN indice
+	// Cockroach doesn't support BRIN indices
 	if isCockroach {
 		sb.WriteString(schemaV1CreationTimeIndexCRDB)
 	} else {
