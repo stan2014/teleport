@@ -34,8 +34,6 @@ import (
 
 func TestUsageReporter(t *testing.T) {
 	eventConsumer := fakeEventConsumer{}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 
 	validCluster := uri.NewClusterURI("foo")
 	clusterWithoutClient := uri.NewClusterURI("no-client")
@@ -71,24 +69,53 @@ func TestUsageReporter(t *testing.T) {
 		InstallationID: "4321",
 	})
 	require.NoError(t, err)
+	t.Cleanup(usageReporter.Stop)
 
 	// Verify that reporting the same app twice adds only one usage event.
-	err = usageReporter.ReportApp(ctx, validCluster.AppendApp("app"))
+	err = usageReporter.ReportApp(validCluster.AppendApp("app"))
 	require.NoError(t, err)
-	err = usageReporter.ReportApp(ctx, validCluster.AppendApp("app"))
+	err = usageReporter.ReportApp(validCluster.AppendApp("app"))
 	require.NoError(t, err)
 	require.Equal(t, 1, eventConsumer.EventCount())
 
 	// Verify that reporting an invalid cluster doesn't submit an event.
-	err = usageReporter.ReportApp(ctx, clusterWithoutClient.AppendApp("bar"))
+	err = usageReporter.ReportApp(clusterWithoutClient.AppendApp("bar"))
 	require.True(t, trace.IsNotFound(err), "Not a NotFound error: %#v", err)
 	require.Equal(t, 1, eventConsumer.EventCount())
-	err = usageReporter.ReportApp(ctx, clusterWithoutProfile.AppendApp("bar"))
+	err = usageReporter.ReportApp(clusterWithoutProfile.AppendApp("bar"))
 	require.True(t, trace.IsNotFound(err), "Not a NotFound error: %#v", err)
 	require.Equal(t, 1, eventConsumer.EventCount())
-	err = usageReporter.ReportApp(ctx, clusterWithoutClusterID.AppendApp("bar"))
+	err = usageReporter.ReportApp(clusterWithoutClusterID.AppendApp("bar"))
 	require.ErrorIs(t, err, trace.NotFound("cluster ID for \"/clusters/no-cluster-id\" not found"))
 	require.Equal(t, 1, eventConsumer.EventCount())
+}
+
+func TestUsageReporter_Stop(t *testing.T) {
+	eventConsumer := fakeEventConsumer{}
+	clientCache := fakeClientCache{blockOnCtx: true}
+	clientStore := client.NewMemClientStore()
+	clusterIDCache := clusteridcache.Cache{}
+
+	usageReporter, err := NewUsageReporter(UsageReporterConfig{
+		EventConsumer:  &eventConsumer,
+		ClientCache:    &clientCache,
+		ClientStore:    clientStore,
+		ClusterIDCache: &clusterIDCache,
+		InstallationID: "4321",
+	})
+	require.NoError(t, err)
+	t.Cleanup(usageReporter.Stop)
+
+	go func() {
+		usageReporter.Stop()
+	}()
+
+	uri := uri.NewClusterURI("foo").AppendApp("bar")
+	err = usageReporter.ReportApp(uri)
+	require.ErrorIs(t, err, context.Canceled)
+
+	err = usageReporter.ReportApp(uri)
+	require.True(t, trace.IsCompareFailed(err), "expected trace.CompareFailed but got %v", err)
 }
 
 type fakeEventConsumer struct {
@@ -113,9 +140,16 @@ func (ec *fakeEventConsumer) EventCount() int {
 
 type fakeClientCache struct {
 	validClusterURIs map[uri.ResourceURI]struct{}
+	// blockOnCtx makes GetCachedClient block until ctx is canceled.
+	blockOnCtx bool
 }
 
 func (c *fakeClientCache) GetCachedClient(ctx context.Context, appURI uri.ResourceURI) (*client.ClusterClient, error) {
+	if c.blockOnCtx {
+		<-ctx.Done()
+		return nil, trace.Wrap(ctx.Err())
+	}
+
 	if _, ok := c.validClusterURIs[appURI.GetClusterURI()]; !ok {
 		return nil, trace.NotFound("client for cluster %q not found", appURI.GetClusterURI())
 	}

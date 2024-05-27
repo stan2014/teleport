@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gravitational/trace"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -58,6 +59,7 @@ type Service struct {
 	mu             sync.Mutex
 	status         status
 	processManager *vnet.ProcessManager
+	usageReporter  *usageReporter
 }
 
 // New creates an instance of Service.
@@ -132,6 +134,11 @@ func (s *Service) Start(ctx context.Context, req *api.StartRequest) (*api.StartR
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
+	defer func() {
+		if s.status != statusRunning {
+			usageReporter.Stop()
+		}
+	}()
 
 	appProvider := &appProvider{
 		daemonService:      s.cfg.DaemonService,
@@ -166,6 +173,7 @@ func (s *Service) Start(ctx context.Context, req *api.StartRequest) (*api.StartR
 	}()
 
 	s.processManager = processManager
+	s.usageReporter = usageReporter
 	s.status = statusRunning
 	return &api.StartResponse{}, nil
 }
@@ -197,6 +205,7 @@ func (s *Service) stopLocked() error {
 	if err != nil && !errors.Is(err, context.Canceled) {
 		return trace.Wrap(err)
 	}
+	s.usageReporter.Stop()
 
 	s.status = statusNotRunning
 	return nil
@@ -292,7 +301,9 @@ func (p *appProvider) OnNewConnection(ctx context.Context, profileName, leafClus
 	go func() {
 		uri := uri.NewClusterURI(profileName).AppendLeafCluster(leafClusterName).AppendApp(app.GetName())
 
-		err := p.usageReporter.ReportApp(ctx, uri)
+		// Not passing ctx to ReportApp since ctx is tied to the lifetime of the connection.
+		// If it's a short-lived connection, inheriting its context would interrupt reporting.
+		err := p.usageReporter.ReportApp(uri)
 		if err != nil {
 			log.ErrorContext(ctx, "Failed to submit usage event", "app", uri, "error", err)
 		}
@@ -340,6 +351,10 @@ type usageReporter struct {
 	reportedApps map[string]struct{}
 	// mu protects access to reportedApps.
 	mu sync.Mutex
+	// close is used to abort a ReportApp call that's currently in flight.
+	close chan struct{}
+	// closed signals that usageReporter has been stopped and no more events should be reported.
+	closed atomic.Bool
 }
 
 type clientCache interface {
@@ -393,16 +408,34 @@ func NewUsageReporter(cfg UsageReporterConfig) (*usageReporter, error) {
 	return &usageReporter{
 		cfg:          cfg,
 		reportedApps: make(map[string]struct{}),
+		close:        make(chan struct{}),
 	}, nil
 }
 
-func (r *usageReporter) ReportApp(ctx context.Context, appURI uri.ResourceURI) error {
+// ReportApp adds an event related to the given app to the events queue, if the app wasn't reported
+// already. Only one invocation of ReportApp can be in flight at a time.
+func (r *usageReporter) ReportApp(appURI uri.ResourceURI) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.closed.Load() {
+		return trace.CompareFailed("usage reporter has been stopped")
+	}
 
 	if _, hasAppBeenReported := r.reportedApps[appURI.String()]; hasAppBeenReported {
 		return nil
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		select {
+		case <-r.close:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 
 	rootClusterURI := appURI.GetRootClusterURI()
 	client, err := r.cfg.ClientCache.GetCachedClient(ctx, appURI)
@@ -445,4 +478,17 @@ func (r *usageReporter) ReportApp(ctx context.Context, appURI uri.ResourceURI) e
 	r.reportedApps[appURI.String()] = struct{}{}
 
 	return nil
+}
+
+// Stop aborts the reporting of an event that's currently in progress and prevents further events
+// from being reported. It blocks until the current ReportApp call aborts.
+func (r *usageReporter) Stop() {
+	if r.closed.Load() {
+		return
+	}
+
+	r.closed.Store(true)
+	close(r.close)
+	r.mu.Lock()
+	r.mu.Unlock()
 }
