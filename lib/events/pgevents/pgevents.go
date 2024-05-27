@@ -86,27 +86,13 @@ const (
 		event_data json NOT NULL,
 		creation_time timestamptz NOT NULL DEFAULT now(),
 		CONSTRAINT events_pkey PRIMARY KEY (event_time, event_id)
-	);`
-	schemaV1CreationTimeIndexPg   = `CREATE INDEX events_creation_time_idx ON events USING brin (creation_time);`
-	schemaV1CreationTimeIndexCRDB = `CREATE INDEX events_creation_time_idx ON events (creation_time);`
-	schemaV1SessionIDIndex        = `CREATE INDEX events_search_session_events_idx ON events (session_id, event_time, event_id)
+	);
+	CREATE INDEX events_search_session_events_idx ON events (session_id, event_time, event_id)
 		WHERE session_id != '00000000-0000-0000-0000-000000000000';`
+	schemaV1TableWithDateIndex = schemaV1Table + `
+		CREATE INDEX events_creation_time_idx ON events USING brin (creation_time);`
+	schemaV1CockroachRowExpiry = "ALTER TABLE events SET (ttl_expiration_expression = '((creation_time AT TIME ZONE ''UTC'') + (%d * INTERVAL ''1 microsecond'')) AT TIME ZONE ''UTC'' ');"
 )
-
-func buildSchemas(isCockroach bool) []string {
-	sb := strings.Builder{}
-	sb.WriteString(schemaV1Table)
-	sb.WriteRune('\n')
-	// Cockroach doesn't support BRIN indices
-	if isCockroach {
-		sb.WriteString(schemaV1CreationTimeIndexCRDB)
-	} else {
-		sb.WriteString(schemaV1CreationTimeIndexPg)
-	}
-	sb.WriteRune('\n')
-	sb.WriteString(schemaV1SessionIDIndex)
-	return []string{sb.String()}
-}
 
 // Check returns an error if the AuthMode is invalid.
 func (a AuthMode) Check() error {
@@ -237,14 +223,30 @@ func New(ctx context.Context, cfg Config) (*Log, error) {
 		return nil, trace.Wrap(err)
 	}
 
-	isCockroach, err := detectCockroach(ctx, pool)
-	if err != nil {
-		cfg.Log.WithError(err).Warn("Failed to detect if using CockroachDB, continuing assuming it's not.")
+	var isCockroach bool
+
+	// We're a bit hacky here, we must not start the cleanup job if we're
+	// running on cockroach (rows have TTLs). To avoid running another query,
+	// the builder function detects and reports if it's a cockroach via a shared
+	// variable. This works because everything is synchronous.
+	schemaBuilder := func(conn *pgx.Conn) ([]string, string, error) {
+		isCockroach = conn.PgConn().ParameterStatus("crdb_version") != ""
+
+		// If this is a real postgres, we can use the good old static schema.
+		if !isCockroach {
+			return []string{schemaV1TableWithDateIndex}, "", nil
+		}
+
+		cfg.Log.Debug("CockroachDB detected.")
+		var modifier string
+		if !cfg.DisableCleanup {
+			cfg.Log.Debug("Configuring native CockroachDB row expiry.")
+			modifier = fmt.Sprintf(schemaV1CockroachRowExpiry, cfg.RetentionPeriod)
+		}
+		return []string{schemaV1Table}, modifier, nil
 	}
 
-	schemas := buildSchemas(isCockroach)
-
-	if err := pgcommon.SetupAndMigrate(ctx, cfg.Log, pool, "audit_version", schemas); err != nil {
+	if err := pgcommon.SetupAndMigrateDynamic(ctx, cfg.Log, pool, "audit_version", schemaBuilder); err != nil {
 		pool.Close()
 		return nil, trace.Wrap(err)
 	}
@@ -256,7 +258,9 @@ func New(ctx context.Context, cfg Config) (*Log, error) {
 		cancel: cancel,
 	}
 
-	if !cfg.DisableCleanup {
+	// Start the cleanup job if the DB is not Cockroach and the user has not disabled cleanup.
+	if !isCockroach && !cfg.DisableCleanup {
+		cfg.Log.Debug("Starting periodic cleanup background worker.")
 		l.wg.Add(1)
 		go l.periodicCleanup(periodicCtx, cfg.CleanupInterval, cfg.RetentionPeriod)
 	}

@@ -228,18 +228,48 @@ func IsCode(err error, code string) bool {
 	return pgErr != nil && pgErr.Code == code
 }
 
+type database interface {
+	BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error)
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+// SchemasBuilder returns the desired table schemas based on the postgres connection.
+// This allows adapting the schemas based on the postgres flavor (Postgres,
+// CockroachDB ,...) or version.
+// Each schema entry is a schema version, each version is applied once.
+// The builder also returns a modifier which is always applied, even if the database
+// has the latest version. This can be used to update dynamic properties such as
+// the retention.
+type SchemasBuilder func(conn *pgx.Conn) (schemas []string, modifier string, err error)
+
 // SetupAndMigrate sets up the database schema, applying the migrations in the
 // schemas slice in order, starting from the first non-applied one. tableName is
 // the name of a table used to hold schema version numbers.
 func SetupAndMigrate(
 	ctx context.Context,
 	log logrus.FieldLogger,
-	db interface {
-		BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error)
-		Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
-	},
+	db database,
 	tableName string,
 	schemas []string,
+) error {
+	schemasBuilder := func(_ *pgx.Conn) ([]string, string, error) {
+		return schemas, "", nil
+	}
+	return SetupAndMigrateDynamic(ctx, log, db, tableName, schemasBuilder)
+}
+
+// SetupAndMigrateDynamic sets up the database schema, applying the migrations in the
+// schemas slice in order, starting from the first non-applied one. The modifier
+// is always applied, even if the schema is already up to date. tableName is
+// the name of a table used to hold schema version numbers. It takes a function
+// dynamically building schemas based on connection properties. If you only need
+// to set up a static schema, call SetupAndMigrate instead.
+func SetupAndMigrateDynamic(
+	ctx context.Context,
+	log logrus.FieldLogger,
+	db database,
+	tableName string,
+	schemasBuilder SchemasBuilder,
 ) error {
 	tableName = pgx.Identifier{tableName}.Sanitize()
 
@@ -262,6 +292,7 @@ func SetupAndMigrate(
 		log.WithError(err).Debugf("Failed to confirm the existence of the %v table.", tableName)
 	}
 
+	var schemas []string
 	const idempotent = true
 	if err := RetryTx(ctx, log, db, pgx.TxOptions{
 		IsoLevel:   pgx.Serializable,
@@ -274,30 +305,43 @@ func SetupAndMigrate(
 			return trace.Wrap(err)
 		}
 
+		// Get schemas and modifier
+		var err error
+		var modifier string
+		schemas, modifier, err = schemasBuilder(tx.Conn())
+		if err != nil {
+			migrateErr = trace.Wrap(err, "building schemas")
+			return nil
+		}
+
 		if int(version) > len(schemas) {
 			migrateErr = trace.BadParameter("unsupported schema version %v", version)
 			// the transaction succeeded, the error is outside of the transaction
 			return nil
 		}
 
-		if int(version) == len(schemas) {
-			return nil
-		}
+		// Run unapplied migrations
+		if int(version) != len(schemas) {
+			for _, s := range schemas[version:] {
+				if _, err := tx.Exec(ctx, s, pgx.QueryExecModeExec); err != nil {
+					return trace.Wrap(err)
+				}
+			}
 
-		for _, s := range schemas[version:] {
-			if _, err := tx.Exec(ctx, s, pgx.QueryExecModeExec); err != nil {
+			if _, err := tx.Exec(ctx,
+				fmt.Sprintf("INSERT INTO %v (version) VALUES ($1)", tableName),
+				pgx.QueryExecModeExec, len(schemas),
+			); err != nil {
 				return trace.Wrap(err)
 			}
 		}
 
-		if _, err := tx.Exec(ctx,
-			fmt.Sprintf("INSERT INTO %v (version) VALUES ($1)", tableName),
-			pgx.QueryExecModeExec, len(schemas),
-		); err != nil {
-			return trace.Wrap(err)
+		// If everything went OK and we have a non-empty modifier, run it
+		if modifier == "" {
+			return nil
 		}
-
-		return nil
+		_, err = tx.Exec(ctx, modifier, pgx.QueryExecModeExec)
+		return trace.Wrap(err, "running modifier")
 	}); err != nil {
 		return trace.Wrap(err)
 	}
