@@ -760,6 +760,7 @@ func (s *SlackSuiteEnterprise) TestAccessListReminder() {
 }
 
 func (s *SlackBaseSuite) requireReminderMsgEqual(ctx context.Context, id, text string) {
+	s.T().Helper()
 	t := s.T()
 
 	msg, err := s.fakeSlack.CheckNewMessage(ctx)
