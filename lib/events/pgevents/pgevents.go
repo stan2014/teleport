@@ -261,7 +261,10 @@ func New(ctx context.Context, cfg Config) (*Log, error) {
 }
 
 func buildSchema(isCockroach bool, cfg *Config) (schemas []string, modifier string, err error) {
-	// If this is a real postgres, we can use the good old static schema.
+	// If this is a real postgres, we cannot use self-expiring rows and we need
+	// to create an index for the deletion job to run. This index type is not
+	// supported by CockroachDB at the time of writing
+	// (see https://github.com/cockroachdb/cockroach/issues/41293)
 	if !isCockroach {
 		return []string{schemaV1TableWithDateIndex}, modifier, nil
 	}
