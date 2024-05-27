@@ -22,6 +22,7 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -123,5 +124,107 @@ func TestConfig(t *testing.T) {
 		actualConfig.PoolConfig = nil
 
 		require.Equal(t, expectedConfig, &actualConfig)
+	}
+}
+
+func TestBuildSchema(t *testing.T) {
+	testLog := utils.NewLoggerForTests()
+
+	cleanupConfig := &Config{
+		Log:             testLog,
+		RetentionPeriod: defaultRetentionPeriod,
+		CleanupInterval: defaultCleanupInterval,
+	}
+
+	frequentCleanupConfig := &Config{
+		Log:             testLog,
+		RetentionPeriod: 24 * time.Hour,
+		CleanupInterval: defaultCleanupInterval,
+	}
+
+	noCleanupConfig := &Config{
+		Log:            testLog,
+		DisableCleanup: true,
+	}
+
+	hasDateIndex := func(t require.TestingT, schemasRaw interface{}, args ...interface{}) {
+		schemas, ok := schemasRaw.([]string)
+		require.True(t, ok, "Schemas must be a list of string")
+		require.Contains(t, schemas[0], dateIndex, args...)
+	}
+	hasNoDateIndex := func(t require.TestingT, schemasRaw interface{}, args ...interface{}) {
+		schemas, ok := schemasRaw.([]string)
+		require.True(t, ok, "Schemas must be a list of string")
+		require.NotContains(t, schemas[0], dateIndex, args...)
+	}
+
+	type args struct {
+		isCockroach bool
+		cfg         *Config
+	}
+	tests := []struct {
+		name           string
+		args           args
+		assertSchema   require.ValueAssertionFunc
+		assertModifier require.ValueAssertionFunc
+	}{
+		{
+			name: "postgres",
+			args: args{
+				isCockroach: false,
+				cfg:         cleanupConfig,
+			},
+			assertSchema:   hasDateIndex,
+			assertModifier: require.Empty,
+		},
+		{
+			name: "postgres cleanup disabled",
+			args: args{
+				isCockroach: false,
+				cfg:         noCleanupConfig,
+			},
+			assertSchema:   hasDateIndex,
+			assertModifier: require.Empty,
+		},
+		{
+			name: "cockroach",
+			args: args{
+				isCockroach: true,
+				cfg:         cleanupConfig,
+			},
+			assertSchema: hasNoDateIndex,
+			assertModifier: func(t require.TestingT, modifier interface{}, args ...interface{}) {
+				require.Contains(t, modifier, strconv.FormatInt(defaultRetentionPeriod.Microseconds(), 10))
+			},
+		},
+		{
+			name: "cockroach custom retention",
+			args: args{
+				isCockroach: true,
+				cfg:         frequentCleanupConfig,
+			},
+			assertSchema: hasNoDateIndex,
+			assertModifier: func(t require.TestingT, modifier interface{}, args ...interface{}) {
+				require.Contains(t, modifier, strconv.FormatInt(frequentCleanupConfig.RetentionPeriod.Microseconds(), 10))
+			},
+		},
+		{
+			name: "cockroach cleanup disabled",
+			args: args{
+				isCockroach: true,
+				cfg:         noCleanupConfig,
+			},
+			assertSchema: hasNoDateIndex,
+			assertModifier: func(t require.TestingT, modifier interface{}, args ...interface{}) {
+				require.Equal(t, schemaV1CockroachUnsetRowExpiry, modifier, args...)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schemas, modifier, _ := buildSchema(tt.args.isCockroach, tt.args.cfg)
+			tt.assertSchema(t, schemas)
+			tt.assertModifier(t, modifier)
+		})
 	}
 }

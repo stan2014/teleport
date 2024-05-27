@@ -89,9 +89,10 @@ const (
 	);
 	CREATE INDEX events_search_session_events_idx ON events (session_id, event_time, event_id)
 		WHERE session_id != '00000000-0000-0000-0000-000000000000';`
-	schemaV1TableWithDateIndex = schemaV1Table + `
-		CREATE INDEX events_creation_time_idx ON events USING brin (creation_time);`
-	schemaV1CockroachRowExpiry = "ALTER TABLE events SET (ttl_expiration_expression = '((creation_time AT TIME ZONE ''UTC'') + (%d * INTERVAL ''1 microsecond'')) AT TIME ZONE ''UTC'' ');"
+	dateIndex                       = "CREATE INDEX events_creation_time_idx ON events USING brin (creation_time);"
+	schemaV1TableWithDateIndex      = schemaV1Table + "\n" + dateIndex
+	schemaV1CockroachSetRowExpiry   = "ALTER TABLE events SET (ttl_expiration_expression = '((creation_time AT TIME ZONE ''UTC'') + (%d * INTERVAL ''1 microsecond'')) AT TIME ZONE ''UTC'' ');"
+	schemaV1CockroachUnsetRowExpiry = "ALTER TABLE events RESET (ttl_expiration_expression);"
 )
 
 // Check returns an error if the AuthMode is invalid.
@@ -232,18 +233,7 @@ func New(ctx context.Context, cfg Config) (*Log, error) {
 	schemaBuilder := func(conn *pgx.Conn) ([]string, string, error) {
 		isCockroach = conn.PgConn().ParameterStatus("crdb_version") != ""
 
-		// If this is a real postgres, we can use the good old static schema.
-		if !isCockroach {
-			return []string{schemaV1TableWithDateIndex}, "", nil
-		}
-
-		cfg.Log.Debug("CockroachDB detected.")
-		var modifier string
-		if !cfg.DisableCleanup {
-			cfg.Log.Debug("Configuring native CockroachDB row expiry.")
-			modifier = fmt.Sprintf(schemaV1CockroachRowExpiry, cfg.RetentionPeriod)
-		}
-		return []string{schemaV1Table}, modifier, nil
+		return buildSchema(isCockroach, &cfg)
 	}
 
 	if err := pgcommon.SetupAndMigrateDynamic(ctx, cfg.Log, pool, "audit_version", schemaBuilder); err != nil {
@@ -268,6 +258,23 @@ func New(ctx context.Context, cfg Config) (*Log, error) {
 	l.log.Info("Started events backend.")
 
 	return l, nil
+}
+
+func buildSchema(isCockroach bool, cfg *Config) (schemas []string, modifier string, err error) {
+	// If this is a real postgres, we can use the good old static schema.
+	if !isCockroach {
+		return []string{schemaV1TableWithDateIndex}, modifier, nil
+	}
+
+	cfg.Log.Debug("CockroachDB detected.")
+	if !cfg.DisableCleanup {
+		cfg.Log.Debug("Setting native CockroachDB row expiry.")
+		modifier = fmt.Sprintf(schemaV1CockroachSetRowExpiry, cfg.RetentionPeriod)
+	} else {
+		cfg.Log.Debug("Unsetting native CockroachDB row expiry.")
+		modifier = schemaV1CockroachUnsetRowExpiry
+	}
+	return []string{schemaV1Table}, modifier, nil
 }
 
 // Log is an external [events.AuditLogger] backed by a PostgreSQL database.
