@@ -50,6 +50,7 @@ import { ResourceSearchError } from 'teleterm/ui/services/resources';
 import { isRetryable } from 'teleterm/ui/utils/retryWithRelogin';
 import { assertUnreachable } from 'teleterm/ui/utils';
 import { isWebApp } from 'teleterm/services/tshd/app';
+import { useVnetContext } from 'teleterm/ui/Vnet';
 
 import { SearchAction } from '../actions';
 import { useSearchContext } from '../SearchContext';
@@ -86,6 +87,7 @@ export function ActionPicker(props: { input: ReactElement }) {
     resourceActionsAttempt,
     resourceSearchAttempt,
   } = useActionAttempts();
+  const { isSupported: isVnetSupported } = useVnetContext();
   const totalCountOfClusters = clustersService.getClusters().length;
 
   const getClusterName = useCallback(
@@ -211,6 +213,7 @@ export function ActionPicker(props: { input: ReactElement }) {
               <Component
                 searchResult={item.searchResult}
                 getOptionalClusterName={getOptionalClusterName}
+                isVnetSupported={isVnetSupported}
               />
             ),
           };
@@ -511,6 +514,7 @@ export const ComponentMap: Record<
 type SearchResultItem<T> = {
   searchResult: T;
   getOptionalClusterName: (uri: uri.ClusterOrResourceUri) => string;
+  isVnetSupported: boolean;
 };
 
 function ClusterFilterItem(props: SearchResultItem<SearchResultCluster>) {
@@ -766,7 +770,9 @@ export function AppItem(props: SearchResultItem<SearchResultApp>) {
         flexWrap="wrap"
         gap={1}
       >
-        <Text typography="body1">{getAppItemCopy($appName, app)}</Text>
+        <Text typography="body1">
+          {getAppItemCopy($appName, app, props.isVnetSupported)}
+        </Text>
         <Box ml="auto">
           <Text typography="body2" fontSize={0}>
             {props.getOptionalClusterName(app.uri)}
@@ -789,12 +795,21 @@ export function AppItem(props: SearchResultItem<SearchResultApp>) {
   );
 }
 
-function getAppItemCopy($appName: React.JSX.Element, app: tsh.App) {
+function getAppItemCopy(
+  $appName: React.JSX.Element,
+  app: tsh.App,
+  isVnetSupported: boolean
+) {
   if (app.samlApp) {
     return <>Log in to {$appName} in the browser</>;
   }
   if (isWebApp(app) || app.awsConsole) {
     return <>Launch {$appName} in the browser</>;
+  }
+
+  // TCP app
+  if (isVnetSupported) {
+    return <>Connect with VNet to {$appName}</>;
   }
   return <>Set up an app connection to {$appName}</>;
 }
